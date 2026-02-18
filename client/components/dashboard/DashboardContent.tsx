@@ -1,0 +1,87 @@
+'use client';
+
+import { useProducts } from '@/hooks/useProducts';
+import { motion } from 'framer-motion';
+import {
+  OverviewCard,
+  ExpiringSoonCard,
+  WarrantyTimelineCard,
+  AnalyticsChartCard,
+  QuickAddCard,
+} from '@/components/dashboard/bento';
+
+const container = {
+  hidden: { opacity: 0 },
+  show: {
+    opacity: 1,
+    transition: {
+      staggerChildren: 0.08,
+      delayChildren: 0.1,
+    },
+  },
+};
+
+export const DashboardContent = () => {
+  const { products, stats, expiringProducts, isLoading } = useProducts();
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative min-h-screen">
+      {/* Subtle Background Depth */}
+      <div className="fixed inset-0 bg-gradient-to-br from-white via-[#f5f7fa] to-[#eef2f7] -z-10" />
+      <div className="fixed top-0 right-0 w-96 h-96 bg-blue-300 rounded-full blur-3xl opacity-20 -z-10" />
+      
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, ease: 'easeOut' }}
+        className="max-w-7xl mx-auto px-8 py-10"
+      >
+        {/* Header */}
+        <div className="mb-8">
+          <p className="text-sm text-neutral-500 tracking-wide mb-1">Welcome back</p>
+          <h1 className="text-3xl font-semibold tracking-tight text-neutral-900">
+            Warranty Overview
+          </h1>
+        </div>
+
+        {/* Main Grid Layout */}
+        <motion.div
+          variants={container}
+          initial="hidden"
+          animate="show"
+          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"
+        >
+          {/* Overview Card - Spans 2 columns */}
+          <OverviewCard
+            total={stats?.total || 0}
+            active={stats?.active || 0}
+            expired={stats?.expired || 0}
+          />
+
+          {/* Expiring Soon Card */}
+          <ExpiringSoonCard products={expiringProducts || []} />
+
+          {/* Analytics Chart Card */}
+          <AnalyticsChartCard
+            active={stats?.active || 0}
+            expired={stats?.expired || 0}
+          />
+
+          {/* Warranty Timeline Card - Full Width */}
+          <WarrantyTimelineCard products={products || []} />
+
+          {/* Quick Add Card */}
+          <QuickAddCard />
+        </motion.div>
+      </motion.div>
+    </div>
+  );
+};
