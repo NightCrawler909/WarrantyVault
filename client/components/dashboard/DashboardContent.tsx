@@ -1,6 +1,9 @@
 'use client';
 
 import { useProducts } from '@/hooks/useProducts';
+import { useState, useEffect } from 'react';
+import { productService } from '@/services/productService';
+import { ProductAnalytics } from '@/types/product';
 import { motion } from 'framer-motion';
 import {
   OverviewCard,
@@ -8,7 +11,9 @@ import {
   WarrantyTimelineCard,
   AnalyticsChartCard,
   QuickAddCard,
+  WarrantyHealthCard,
 } from '@/components/dashboard/bento';
+import { SmartAlertBanner } from '@/components/dashboard/SmartAlertBanner';
 
 const container = {
   hidden: { opacity: 0 },
@@ -23,8 +28,24 @@ const container = {
 
 export const DashboardContent = () => {
   const { products, stats, expiringProducts, isLoading } = useProducts();
+  const [analytics, setAnalytics] = useState<ProductAnalytics | null>(null);
 
-  if (isLoading) {
+  useEffect(() => {
+    const fetchAnalytics = async () => {
+      try {
+        const data = await productService.getAnalytics();
+        setAnalytics(data);
+      } catch (error) {
+        console.error('Failed to fetch analytics:', error);
+      }
+    };
+
+    if (!isLoading) {
+      fetchAnalytics();
+    }
+  }, [isLoading]);
+
+  if (isLoading || !analytics) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
@@ -45,11 +66,19 @@ export const DashboardContent = () => {
         className="max-w-7xl mx-auto px-8 py-10"
       >
         {/* Header */}
-        <div className="mb-8">
+        <div className="mb-6">
           <p className="text-sm text-neutral-500 tracking-wide mb-1">Welcome back</p>
           <h1 className="text-3xl font-semibold tracking-tight text-neutral-900">
             Warranty Overview
           </h1>
+        </div>
+
+        {/* Smart Alert Banner */}
+        <div className="mb-6">
+          <SmartAlertBanner
+            urgentCount={analytics.urgentExpiring.length}
+            upcomingCount={analytics.upcomingExpiring.length}
+          />
         </div>
 
         {/* Main Grid Layout */}
@@ -61,18 +90,21 @@ export const DashboardContent = () => {
         >
           {/* Overview Card - Spans 2 columns */}
           <OverviewCard
-            total={stats?.total || 0}
-            active={stats?.active || 0}
-            expired={stats?.expired || 0}
+            total={analytics.totalProducts}
+            active={analytics.activeCount}
+            expired={analytics.expiredCount}
           />
 
           {/* Expiring Soon Card */}
           <ExpiringSoonCard products={expiringProducts || []} />
 
+          {/* Warranty Health Card */}
+          <WarrantyHealthCard healthScore={analytics.healthScore} />
+
           {/* Analytics Chart Card */}
           <AnalyticsChartCard
-            active={stats?.active || 0}
-            expired={stats?.expired || 0}
+            active={analytics.activeCount}
+            expired={analytics.expiredCount}
           />
 
           {/* Warranty Timeline Card - Full Width */}

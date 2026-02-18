@@ -70,23 +70,31 @@ class WarrantyService {
     // Get all products for the user
     const allProducts = await Product.find({ userId }).lean();
 
-    // Count products expiring in 7 days
-    const productsExpiringIn7Days = await Product.countDocuments({
+    // Get urgent expiring products (within 7 days)
+    const urgentExpiring = await Product.find({
       userId,
       warrantyExpiry: { 
         $gte: now, 
         $lte: sevenDaysFromNow 
       },
-    });
+    }).lean();
 
-    // Count products expiring in 30 days
-    const productsExpiringIn30Days = await Product.countDocuments({
+    // Add remainingDays and sort by ascending
+    const urgentExpiringWithDays = urgentExpiring
+      .map(product => ({
+        ...product,
+        remainingDays: this.getDaysRemaining(product.warrantyExpiry)
+      }))
+      .sort((a, b) => a.remainingDays - b.remainingDays);
+
+    // Get upcoming expiring products (within 30 days)
+    const upcomingExpiring = await Product.find({
       userId,
       warrantyExpiry: { 
         $gte: now, 
         $lte: thirtyDaysFromNow 
       },
-    });
+    }).lean();
 
     // Calculate stats
     const stats = {
@@ -102,10 +110,21 @@ class WarrantyService {
       else if (product.status === 'expired') stats.expiredCount++;
     });
 
+    // Calculate health score
+    // Start at 100, -5 for each expiring, -10 for each expired, min 0
+    const healthScore = Math.max(
+      0,
+      100 - (stats.expiringCount * 5) - (stats.expiredCount * 10)
+    );
+
     return {
-      ...stats,
-      productsExpiringIn7Days,
-      productsExpiringIn30Days,
+      totalProducts: stats.totalProducts,
+      activeCount: stats.activeCount,
+      expiringCount: stats.expiringCount,
+      expiredCount: stats.expiredCount,
+      urgentExpiring: urgentExpiringWithDays,
+      upcomingExpiring,
+      healthScore,
     };
   }
 

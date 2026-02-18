@@ -44,8 +44,8 @@ export const productService = {
     return response.data.data; // Extract nested data
   },
 
-  async getRecentProducts() {
-    const response = await apiClient.get('/products/recent');
+  async getAnalytics() {
+    const response = await apiClient.get('/products/analytics');
     return response.data.data;
   },
 

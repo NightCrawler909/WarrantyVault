@@ -12,6 +12,8 @@ export interface Product {
   notes?: string;
   createdAt: Date;
   updatedAt: Date;
+  remainingDays?: number;
+  status?: string;
 }
 
 export interface ProductFormData {
@@ -29,4 +31,14 @@ export interface ProductStats {
   active: number;
   expiringSoon: number;
   expired: number;
+}
+
+export interface ProductAnalytics {
+  totalProducts: number;
+  activeCount: number;
+  expiringCount: number;
+  expiredCount: number;
+  urgentExpiring: Product[];
+  upcomingExpiring: Product[];
+  healthScore: number;
 }

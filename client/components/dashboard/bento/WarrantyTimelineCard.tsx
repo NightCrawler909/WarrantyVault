@@ -94,43 +94,56 @@ export const WarrantyTimelineCard: React.FC<WarrantyTimelineCardProps> = ({
         </div>
       ) : (
         <div className="space-y-3">
-          {topProducts.map((product, index) => (
-            <motion.div
-              key={product._id}
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.3, delay: 0.05 * index }}
-              className="group"
-            >
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-3 flex-1 min-w-0">
-                  <div className={`w-2 h-2 rounded-full ${getStatusColor(product.daysRemaining)} flex-shrink-0`} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-neutral-900 truncate">
-                      {product.name}
+          {topProducts.map((product, index) => {
+            const isUrgent = product.daysRemaining < 7 && product.daysRemaining >= 0;
+            
+            return (
+              <motion.div
+                key={product._id}
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.3, delay: 0.05 * index }}
+                className={`group p-3 rounded-lg transition-colors duration-200 ${
+                  isUrgent ? 'bg-red-50/50 border-l-2 border-red-400' : ''
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div className={`w-2 h-2 rounded-full ${getStatusColor(product.daysRemaining)} flex-shrink-0`} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-medium text-neutral-900 truncate">
+                          {product.name}
+                        </p>
+                        {isUrgent && (
+                          <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs font-medium rounded">
+                            Urgent
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-neutral-500">{product.category}</p>
+                    </div>
+                  </div>
+                  <div className="ml-4 text-right flex-shrink-0">
+                    <p className="text-xs font-medium text-neutral-900">
+                      {product.daysRemaining >= 0 ? `${product.daysRemaining}d left` : 'Expired'}
                     </p>
-                    <p className="text-xs text-neutral-500">{product.category}</p>
+                    <p className="text-xs text-neutral-500">{product.usagePercent}% used</p>
                   </div>
                 </div>
-                <div className="ml-4 text-right flex-shrink-0">
-                  <p className="text-xs font-medium text-neutral-900">
-                    {product.daysRemaining >= 0 ? `${product.daysRemaining}d left` : 'Expired'}
-                  </p>
-                  <p className="text-xs text-neutral-500">{product.usagePercent}% used</p>
-                </div>
-              </div>
 
-              {/* Progress Bar */}
-              <div className={`relative h-2 bg-neutral-200 rounded-full overflow-hidden`}>
-                <motion.div
-                  initial={{ width: 0 }}
-                  animate={{ width: `${product.usagePercent}%` }}
-                  transition={{ duration: 1, delay: 0.2 + 0.05 * index, ease: 'easeOut' }}
-                  className={`h-full ${getStatusColor(product.daysRemaining)} rounded-full`}
-                />
-              </div>
-            </motion.div>
-          ))}
+                {/* Progress Bar */}
+                <div className={`relative h-2 bg-neutral-200 rounded-full overflow-hidden`}>
+                  <motion.div
+                    initial={{ width: 0 }}
+                    animate={{ width: `${product.usagePercent}%` }}
+                    transition={{ duration: 1, delay: 0.2 + 0.05 * index, ease: 'easeOut' }}
+                    className={`h-full ${getStatusColor(product.daysRemaining)} rounded-full`}
+                  />
+                </div>
+              </motion.div>
+            );
+          })}
         </div>
       )}
     </motion.div>
