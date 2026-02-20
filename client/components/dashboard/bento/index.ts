@@ -4,3 +4,4 @@ export { WarrantyTimelineCard } from './WarrantyTimelineCard';
 export { AnalyticsChartCard } from './AnalyticsChartCard';
 export { QuickAddCard } from './QuickAddCard';
 export { WarrantyHealthCard } from './WarrantyHealthCard';
+export { ManageInvoicesCard } from './ManageInvoicesCard';

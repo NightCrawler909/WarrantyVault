@@ -25,8 +25,8 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan('dev'));
 
-// Serve uploaded files
-app.use('/uploads', express.static('uploads'));
+// DO NOT expose uploads folder publicly - use authenticated routes instead
+// Invoice files are served securely via /api/products/:id/invoice
 
 // Routes
 app.use('/api/auth', authRoutes);

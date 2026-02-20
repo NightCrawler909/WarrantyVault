@@ -12,6 +12,7 @@ import {
   AnalyticsChartCard,
   QuickAddCard,
   WarrantyHealthCard,
+  ManageInvoicesCard,
 } from '@/components/dashboard/bento';
 import { SmartAlertBanner } from '@/components/dashboard/SmartAlertBanner';
 
@@ -112,6 +113,9 @@ export const DashboardContent = () => {
 
           {/* Quick Add Card */}
           <QuickAddCard />
+
+          {/* Manage Invoices Card */}
+          <ManageInvoicesCard />
         </motion.div>
       </motion.div>
     </div>

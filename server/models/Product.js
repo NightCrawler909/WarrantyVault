@@ -44,6 +44,15 @@ const productSchema = new mongoose.Schema(
     invoiceUrl: {
       type: String,
     },
+    invoiceFileName: {
+      type: String,
+    },
+    invoiceSize: {
+      type: Number,
+    },
+    invoiceMimeType: {
+      type: String,
+    },
     notes: {
       type: String,
     },
