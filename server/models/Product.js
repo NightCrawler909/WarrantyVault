@@ -13,11 +13,6 @@ const productSchema = new mongoose.Schema(
       required: [true, 'Product name is required'],
       trim: true,
     },
-    category: {
-      type: String,
-      required: [true, 'Category is required'],
-      enum: ['electronics', 'appliances', 'furniture', 'automotive', 'tools', 'other'],
-    },
     purchaseDate: {
       type: Date,
       required: [true, 'Purchase date is required'],

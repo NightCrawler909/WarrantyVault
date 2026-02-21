@@ -4,7 +4,7 @@ import { DashboardLayout } from '@/components/layout/DashboardLayout';
 export default function AddProductPage() {
   return (
     <DashboardLayout>
-      <div className="max-w-2xl">
+      <div className="max-w-6xl mx-auto px-4">
         <h1 className="text-3xl font-bold mb-6">Add New Product</h1>
         <AddProductForm />
       </div>

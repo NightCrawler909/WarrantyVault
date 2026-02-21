@@ -2,7 +2,6 @@ export interface Product {
   _id: string;
   userId: string;
   name: string;
-  category: string;
   purchaseDate: Date;
   warrantyPeriod: number;
   warrantyExpiry: Date;
@@ -18,7 +17,6 @@ export interface Product {
 
 export interface ProductFormData {
   name: string;
-  category: string;
   purchaseDate: string;
   warrantyPeriod: string;
   price?: string;

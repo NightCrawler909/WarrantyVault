@@ -166,43 +166,103 @@ class OCRService {
    * @returns {string|null}
    */
   extractOrderId(text) {
-    const patterns = [
-      // More flexible patterns for Flipkart/e-commerce orders
-      /(?:Order\s*ID|Order\s*Number|OrderID)\s*[:;]?\s*([A-Z0-9]{10,})/i,
-      /(?:Invoice\s*(?:Number|No\.?|#)?)\s*[:;]?\s*#?([A-Z0-9\/\-]{6,})/i,
-      /(?:Bill\s*(?:ID|Number|No\.?)?)\s*[:;]?\s*([A-Z0-9\-\/]{6,})/i,
-      /(?:Receipt\s*(?:ID|Number|No\.?)?)\s*[:;]?\s*([A-Z0-9\-\/]{6,})/i,
-      /(?:Reference\s*(?:ID|Number|No\.?)?)\s*[:;]?\s*([A-Z0-9\-\/]{6,})/i,
-      /(?:Transaction\s*(?:ID|Number)?)\s*[:;]?\s*([A-Z0-9\-\/]{6,})/i,
-      // Flipkart specific: OD followed by long number
-      /\b(OD[A-Z0-9]{10,})\b/i,
-      // Standalone identifiers
-      /\b(?:INV|ORD|BILL|REC|REF)[\-\s]?([A-Z0-9\-\/]{5,})\b/i,
-    ];
+    if (!text) return null;
 
-    // Invalid words that should not be considered order IDs
-    const invalidWords = ['sold', 'by', 'to', 'from', 'the', 'and', 'total', 'amount', 
-                          'price', 'date', 'tax', 'bill', 'invoice', 'order', 'receipt'];
+    // Step 1: Normalize common OCR mistakes
+    let normalizedText = text
+      // Fix "lD" (lowercase L + uppercase D) to "ID"
+      .replace(/\blD\b/g, 'ID')
+      .replace(/\bOrder\s*lD/gi, 'Order ID')
+      // Fix "0D" (zero + D) at word boundary to "OD" (letter O + D)
+      .replace(/\b0D(?=\d)/g, 'OD')
+      // Fix "O" followed by digit to "0" (zero) - but only in likely ID contexts
+      .replace(/([A-Z]{2,})O(\d)/g, '$10$2')
+      // Fix digit followed by "O" to "0" (zero)
+      .replace(/(\d)O(\d)/g, '$10$2')
+      .replace(/(\d)O\b/g, '$10');
 
-    for (const pattern of patterns) {
-      const match = text.match(pattern);
-      if (match && match[1]) {
-        const orderId = match[1].trim();
-        const lowerOrderId = orderId.toLowerCase();
-        
-        // Validate it's not a common word or too short
-        const isInvalid = invalidWords.some(word => lowerOrderId === word);
-        
-        // Must be at least 5 chars, contain at least one digit, and not be a common word
-        if (orderId.length >= 5 && 
-            /\d/.test(orderId) && 
-            !isInvalid) {
-          return orderId;
-        }
+    // Step 2: Define detection patterns in priority order
+    
+    // Pattern 1: Explicit Order ID with label
+    const pattern1 = /Order\s*ID[:\s]*([A-Z0-9]{10,25})/i;
+    
+    // Pattern 2: Flipkart style (OD followed by 10-20 digits)
+    const pattern2 = /\bOD[0-9]{10,20}\b/;
+    
+    // Pattern 3: Invoice Number fallback
+    const pattern3 = /Invoice\s*(?:Number|No\.?)[:\s#]*([A-Z0-9\-]{6,25})/i;
+    
+    // Pattern 4: Multiline case (Order and ID on separate lines)
+    const pattern4 = /Order[\s\n]*ID[:\s]*([A-Z0-9]{10,25})/i;
+
+    // Step 3: Try patterns in safe matching order
+    
+    // Try Pattern 1: Explicit Order ID
+    let match = normalizedText.match(pattern1);
+    if (match && match[1]) {
+      const orderId = match[1].trim();
+      if (this.isValidOrderId(orderId)) {
+        return orderId;
       }
     }
 
+    // Try Pattern 4: Multiline Order ID
+    match = normalizedText.match(pattern4);
+    if (match && match[1]) {
+      const orderId = match[1].trim();
+      if (this.isValidOrderId(orderId)) {
+        return orderId;
+      }
+    }
+
+    // Try Pattern 2: Flipkart style OD prefix
+    match = normalizedText.match(pattern2);
+    if (match) {
+      const orderId = match[0].trim();
+      if (this.isValidOrderId(orderId)) {
+        return orderId;
+      }
+    }
+
+    // Try Pattern 3: Invoice Number as fallback
+    match = normalizedText.match(pattern3);
+    if (match && match[1]) {
+      const orderId = match[1].trim();
+      if (this.isValidOrderId(orderId)) {
+        return orderId;
+      }
+    }
+
+    // No valid match found
     return null;
+  }
+
+  /**
+   * Validate if extracted string is a valid order ID
+   * @param {string} orderId
+   * @returns {boolean}
+   */
+  isValidOrderId(orderId) {
+    if (!orderId || orderId.length < 5) {
+      return false;
+    }
+
+    // Must contain at least one digit
+    if (!/\d/.test(orderId)) {
+      return false;
+    }
+
+    // Invalid words that should not be considered order IDs
+    const invalidWords = ['sold', 'by', 'to', 'from', 'the', 'and', 'total', 'amount', 
+                          'price', 'date', 'tax', 'bill', 'invoice', 'order', 'receipt',
+                          'number', 'hsn', 'sac', 'cgst', 'sgst', 'igst'];
+    
+    const lowerOrderId = orderId.toLowerCase();
+    if (invalidWords.some(word => lowerOrderId === word)) {
+      return false;
+    }
+
+    return true;
   }
 
   /**

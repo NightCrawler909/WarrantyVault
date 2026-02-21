@@ -56,10 +56,9 @@ export const ProductList = () => {
                     <ArrowRight className="w-4 h-4 text-neutral-400 group-hover:text-blue-600 group-hover:translate-x-1 transition-all duration-200" />
                   </div>
 
-                  <h3 className="text-lg font-medium text-neutral-900 mb-2 truncate">
+                  <h3 className="text-lg font-medium text-neutral-900 mb-4 truncate">
                     {product.name}
                   </h3>
-                  <p className="text-sm text-neutral-500 capitalize mb-4">{product.category}</p>
 
                   <div className="space-y-2 border-t border-neutral-100 pt-4">
                     <div className="flex items-center gap-2 text-xs text-neutral-600">

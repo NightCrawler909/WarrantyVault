@@ -29,7 +29,6 @@ class EmailService {
           <p>This is a reminder that the warranty for your product is expiring soon:</p>
           <ul>
             <li><strong>Product:</strong> ${product.name}</li>
-            <li><strong>Category:</strong> ${product.category}</li>
             <li><strong>Expiry Date:</strong> ${new Date(product.warrantyExpiry).toLocaleDateString()}</li>
           </ul>
           <p>Make sure to file any claims before the warranty expires.</p>

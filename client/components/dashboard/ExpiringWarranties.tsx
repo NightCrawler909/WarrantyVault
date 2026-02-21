@@ -15,7 +15,6 @@ export const ExpiringWarranties = () => {
             <div key={product._id} className="flex justify-between items-center p-3 bg-yellow-50 rounded-lg">
               <div>
                 <p className="font-medium">{product.name}</p>
-                <p className="text-sm text-gray-600">{product.category}</p>
               </div>
               <p className="text-sm text-yellow-600 font-medium">
                 {product.daysRemaining} days left

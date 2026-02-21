@@ -39,7 +39,6 @@ const loginValidation = [
  */
 const productValidation = [
   body('name').trim().notEmpty().withMessage('Product name is required'),
-  body('category').notEmpty().withMessage('Category is required'),
   body('purchaseDate').isISO8601().withMessage('Valid purchase date is required'),
   body('warrantyPeriod')
     .isInt({ min: 1 })

@@ -8,7 +8,6 @@ import { formatDate, getDaysRemaining } from '@/utils/date';
 interface Product {
   _id: string;
   name: string;
-  category: string;
   warrantyExpiry: Date;
   warrantyPeriod: number;
   retailer?: string;
@@ -79,13 +78,9 @@ export const WarrantyTimeline: React.FC<WarrantyTimelineProps> = ({ products }) 
                     {product.name}
                   </h3>
                   <div className="flex flex-wrap gap-2 text-sm text-gray-600 dark:text-gray-400">
-                    <span className="inline-flex items-center gap-1">
-                      <Package className="w-4 h-4" />
-                      {product.category}
-                    </span>
                     {product.retailer && (
                       <span className="inline-flex items-center gap-1">
-                        • {product.retailer}
+                        {product.retailer}
                       </span>
                     )}
                   </div>

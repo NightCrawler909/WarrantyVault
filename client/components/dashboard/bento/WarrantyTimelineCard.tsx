@@ -6,7 +6,6 @@ import { Activity } from 'lucide-react';
 interface Product {
   _id: string;
   name: string;
-  category: string;
   warrantyExpiry: Date;
   warrantyPeriod: number;
   purchaseDate: Date;
@@ -121,7 +120,6 @@ export const WarrantyTimelineCard: React.FC<WarrantyTimelineCardProps> = ({
                           </span>
                         )}
                       </div>
-                      <p className="text-xs text-neutral-500">{product.category}</p>
                     </div>
                   </div>
                   <div className="ml-4 text-right flex-shrink-0">

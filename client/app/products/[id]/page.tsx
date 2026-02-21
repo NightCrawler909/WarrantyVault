@@ -166,18 +166,6 @@ export default function ProductDetailPage() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="flex items-start gap-3">
-                <div className="p-2 bg-blue-50 rounded-lg">
-                  <Package className="w-4 h-4 text-blue-600" strokeWidth={2} />
-                </div>
-                <div>
-                  <p className="text-xs text-neutral-500 tracking-wide mb-0.5">Category</p>
-                  <p className="text-sm font-medium text-neutral-900 capitalize">
-                    {product.category}
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-start gap-3">
                 <div className="p-2 bg-emerald-50 rounded-lg">
                   <Calendar className="w-4 h-4 text-emerald-600" strokeWidth={2} />
                 </div>

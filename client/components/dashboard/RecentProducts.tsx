@@ -17,7 +17,6 @@ export const RecentProducts = () => {
               <div className="flex justify-between items-center p-3 hover:bg-gray-50 rounded-lg transition-colors">
                 <div>
                   <p className="font-medium">{product.name}</p>
-                  <p className="text-sm text-gray-600">{product.category}</p>
                 </div>
                 <p className="text-sm text-gray-500">
                   {new Date(product.createdAt).toLocaleDateString()}
