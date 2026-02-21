@@ -50,10 +50,10 @@ export const AddProductForm = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Validate file type - now accepts PDF too!
-    const allowedTypes = ['image/jpeg', 'image/png', 'application/pdf'];
+    // Validate file type - PDF only
+    const allowedTypes = ['application/pdf'];
     if (!allowedTypes.includes(file.type)) {
-      toast.error('Please upload a JPG, PNG, or PDF file');
+      toast.error('Please upload a PDF file');
       return;
     }
 
@@ -64,8 +64,7 @@ export const AddProductForm = () => {
     }
 
     setInvoiceFile(file);
-    const fileType = file.type === 'application/pdf' ? 'PDF' : 'image';
-    toast.success(`${fileType} uploaded! Click "Extract Data" to auto-fill form.`);
+    toast.success('PDF uploaded! Click "Extract Data" to auto-fill form.');
   };
 
   const handleExtractData = async () => {
@@ -234,7 +233,7 @@ export const AddProductForm = () => {
                 <input
                   type="file"
                   id="invoice-upload"
-                  accept="image/jpeg,image/png,application/pdf"
+                  accept="application/pdf"
                   onChange={handleInvoiceUpload}
                   className="hidden"
                 />
@@ -250,7 +249,7 @@ export const AddProductForm = () => {
                       Click to upload invoice
                     </p>
                     <p className="text-sm text-neutral-500">
-                      PDF, JPG or PNG • Max 5MB
+                      PDF only • Max 5MB
                     </p>
                   </div>
                 </label>

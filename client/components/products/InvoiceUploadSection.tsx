@@ -34,11 +34,11 @@ export const InvoiceUploadSection: React.FC<InvoiceUploadSectionProps> = ({
   };
 
   const validateFile = (file: File) => {
-    const allowedTypes = ['application/pdf', 'image/jpeg', 'image/png'];
+    const allowedTypes = ['application/pdf'];
     const maxSize = 5 * 1024 * 1024; // 5MB
 
     if (!allowedTypes.includes(file.type)) {
-      toast.error('Invalid file type. Only PDF, JPEG, and PNG are allowed.');
+      toast.error('Invalid file type. Only PDF files are allowed.');
       return false;
     }
 
@@ -174,7 +174,7 @@ export const InvoiceUploadSection: React.FC<InvoiceUploadSectionProps> = ({
             >
               <input
                 type="file"
-                accept=".pdf,.jpg,.jpeg,.png"
+                accept=".pdf"
                 onChange={handleFileSelect}
                 disabled={isUploading}
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
@@ -190,7 +190,7 @@ export const InvoiceUploadSection: React.FC<InvoiceUploadSectionProps> = ({
                     {isUploading ? 'Uploading...' : 'Drop invoice here or click to browse'}
                   </p>
                   <p className="text-xs text-neutral-500">
-                    PDF, JPEG, or PNG • Max 5MB
+                    PDF only • Max 5MB
                   </p>
                 </div>
 
@@ -260,7 +260,7 @@ export const InvoiceUploadSection: React.FC<InvoiceUploadSectionProps> = ({
             <input
               id="replace-input"
               type="file"
-              accept=".pdf,.jpg,.jpeg,.png"
+              accept=".pdf"
               onChange={handleFileSelect}
               className="hidden"
             />

@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const pdfService = require('./pdfService');
 const imagePreprocessService = require('./imagePreprocessService');
+const pythonAIService = require('./pythonAIService');
 
 class OCRService {
   constructor() {
@@ -50,9 +51,10 @@ class OCRService {
   }
 
   /**
-   * Extract text from invoice image or PDF using optimized OCR pipeline
+   * Extract text from invoice image or PDF using Python AI service (PaddleOCR)
+   * Falls back to Tesseract if Python service is unavailable
    * @param {string} filePath - Path to the invoice file
-   * @returns {Promise<string>} Extracted text
+   * @returns {Promise<{text: string, confidence: number, method: string}>} Extracted text with metadata
    */
   async extractInvoiceData(filePath) {
     let preprocessedPath = null;
@@ -78,7 +80,11 @@ class OCRService {
         if (!pdfResult.requiresOCR) {
           // PDF has embedded text - use it directly
           console.log('✅ Using embedded PDF text (no OCR required)');
-          return this.advancedTextCleaning(pdfResult.text);
+          return {
+            text: this.advancedTextCleaning(pdfResult.text),
+            confidence: 1.0,
+            method: 'embedded_pdf'
+          };
         }
         
         // PDF needs OCR - use converted image
@@ -102,60 +108,90 @@ class OCRService {
         }
       }
 
-      // PART 2 & 3: Image Quality Analysis & Preprocessing
-      console.log('🖼️  Analyzing image quality...');
-      const quality = await imagePreprocessService.analyzeImageQuality(filePath);
-      console.log(`   Resolution: ${quality.width}x${quality.height}`);
-      console.log(`   Format: ${quality.format}, Color: ${quality.isColor ? 'Yes' : 'No'}`);
-      console.log(`   Preprocessing needed: ${quality.needsPreprocessing ? 'Yes' : 'No'} (${quality.recommendedLevel})`);
-
-      if (quality.needsPreprocessing) {
-        console.log('🔧 Preprocessing image for optimal OCR...');
+      // HYBRID ARCHITECTURE: Try Python AI Service first, fallback to Tesseract
+      let extractionResult;
+      
+      try {
+        // ATTEMPT 1: Python AI Service (PaddleOCR) - Primary Method
+        const isAvailable = await pythonAIService.isServiceAvailable();
         
-        if (quality.recommendedLevel === 'aggressive') {
-          preprocessedPath = await imagePreprocessService.aggressivePreprocess(filePath);
-        } else if (quality.recommendedLevel === 'light') {
-          preprocessedPath = await imagePreprocessService.lightPreprocess(filePath);
+        if (isAvailable) {
+          console.log('🐍 Using Python AI Service (PaddleOCR)...');
+          const result = await pythonAIService.extractText(filePath);
+          
+          extractionResult = {
+            text: this.advancedTextCleaning(result.text),
+            confidence: result.confidence,
+            method: 'paddleocr'
+          };
+          
+          console.log(`✅ PaddleOCR completed - Confidence: ${(result.confidence * 100).toFixed(1)}%`);
         } else {
-          preprocessedPath = await imagePreprocessService.preprocessForOCR(filePath);
+          throw new Error('Python AI service not available');
         }
+      } catch (pythonError) {
+        // ATTEMPT 2: Fallback to Tesseract.js
+        console.log('⚠️ Python AI service unavailable - falling back to Tesseract.js');
+        console.log(`   Reason: ${pythonError.message}`);
         
-        // Use preprocessed image for OCR
-        filePath = preprocessedPath;
-      }
+        // Image preprocessing for Tesseract
+        console.log('🖼️  Analyzing image quality...');
+        const quality = await imagePreprocessService.analyzeImageQuality(filePath);
+        console.log(`   Resolution: ${quality.width}x${quality.height}`);
+        console.log(`   Format: ${quality.format}, Color: ${quality.isColor ? 'Yes' : 'No'}`);
+        console.log(`   Preprocessing needed: ${quality.needsPreprocessing ? 'Yes' : 'No'} (${quality.recommendedLevel})`);
 
-      // PART 4: Run Tesseract with Improved Configuration
-      console.log('🔍 Running enhanced Tesseract OCR...');
-      console.log(`   Config: LSTM engine, PSM ${this.tesseractConfig.psm}, preserve spaces`);
-      
-      const result = await Tesseract.recognize(filePath, this.tesseractConfig.lang, {
-        logger: (m) => {
-          if (m.status === 'recognizing text') {
-            const progress = Math.round(m.progress * 100);
-            if (progress % 20 === 0 || progress === 100) {
-              console.log(`   OCR Progress: ${progress}%`);
-            }
+        if (quality.needsPreprocessing) {
+          console.log('🔧 Preprocessing image for optimal OCR...');
+          
+          if (quality.recommendedLevel === 'aggressive') {
+            preprocessedPath = await imagePreprocessService.aggressivePreprocess(filePath);
+          } else if (quality.recommendedLevel === 'light') {
+            preprocessedPath = await imagePreprocessService.lightPreprocess(filePath);
+          } else {
+            preprocessedPath = await imagePreprocessService.preprocessForOCR(filePath);
           }
-        },
-        ...this.tesseractConfig,
-      });
+          
+          // Use preprocessed image for OCR
+          filePath = preprocessedPath;
+        }
 
-      const confidence = result.data.confidence || 0;
-      console.log(`✅ OCR completed - Confidence: ${confidence.toFixed(1)}%`);
-      
-      if (confidence < 60) {
-        console.log('⚠️  Low confidence - results may be inaccurate');
+        // Run Tesseract with Improved Configuration
+        console.log('🔍 Running enhanced Tesseract OCR...');
+        console.log(`   Config: LSTM engine, PSM ${this.tesseractConfig.psm}, preserve spaces`);
+        
+        const result = await Tesseract.recognize(filePath, this.tesseractConfig.lang, {
+          logger: (m) => {
+            if (m.status === 'recognizing text') {
+              const progress = Math.round(m.progress * 100);
+              if (progress % 20 === 0 || progress === 100) {
+                console.log(`   OCR Progress: ${progress}%`);
+              }
+            }
+          },
+          ...this.tesseractConfig,
+        });
+
+        const confidence = result.data.confidence || 0;
+        console.log(`✅ Tesseract OCR completed - Confidence: ${confidence.toFixed(1)}%`);
+        
+        if (confidence < 60) {
+          console.log('⚠️  Low confidence - results may be inaccurate');
+        }
+
+        extractionResult = {
+          text: this.advancedTextCleaning(result.data.text),
+          confidence: confidence / 100, // Normalize to 0-1
+          method: 'tesseract'
+        };
       }
-
-      // PART 5: Advanced Text Cleaning
-      const cleanedText = this.advancedTextCleaning(result.data.text);
       
-      return cleanedText;
+      return extractionResult;
     } catch (error) {
       console.error('❌ OCR extraction error:', error);
       throw new Error(`Failed to extract text from invoice: ${error.message}`);
     } finally {
-      // PART 7: Cleanup temporary files
+      // Cleanup temporary files
       if (preprocessedPath) {
         imagePreprocessService.cleanupTempFile(preprocessedPath);
       }
@@ -540,20 +576,33 @@ class OCRService {
     };
     
     // A. Order ID: OD430543585270089100 (STRICT: Must be exactly 20 chars = OD + 18 digits)
-    let match = text.match(/\bOD\d{18}\b/);
+    // PERMANENT FIX - Handles OCR concatenation (e.g., OD43054358527008910022-02-2024)
+    
+    // Step 1: Match any OD sequence with 18-25 digits (catches extra digits from date merging)
+    let match = text.match(/OD\d{18,25}/);
     if (!match) {
       // Try with label
-      match = text.match(/Order\s*ID[:\s]*(OD\d{18})\b/i);
+      match = text.match(/Order\s*ID[:\s]*(OD\d{18,25})/i);
     }
+    
     if (match) {
-      const orderId = match[0].startsWith('OD') ? match[0] : match[1];
-      // Strict validation: must be exactly 20 characters
-      if (orderId && orderId.length === 20) {
-        data.detectedOrderId = orderId;
+      // Step 2: Get the raw candidate (might be longer than 20 chars)
+      let candidate = match[0].startsWith('OD') ? match[0] : match[1];
+      
+      // Step 3: Enforce strict 20-character limit (OD + 18 digits)
+      if (candidate.length >= 20) {
+        candidate = candidate.slice(0, 20);
+      }
+      
+      // Step 4: Final validation - must be exactly OD + 18 digits
+      if (/^OD\d{18}$/.test(candidate) && candidate.length === 20) {
+        data.detectedOrderId = candidate;
         console.log('   [Flipkart] Order ID:', data.detectedOrderId);
       } else {
-        console.log('   [Flipkart] Invalid Order ID length:', orderId?.length, '- expected 20');
+        console.log('   [Flipkart] Invalid Order ID format after normalization:', candidate);
       }
+    } else {
+      console.log('   [Flipkart] Order ID not found in expected format');
     }
     
     // B. Invoice Number # FAFO7Z2401525755
@@ -593,14 +642,44 @@ class OCRService {
     data.detectedProductName = this.extractFlipkartProductName(text);
     console.log('   [Flipkart] Product:', data.detectedProductName);
     
-    // E. Price: Grand Total ₹ 549.00
-    match = text.match(/Grand\s*Total\s*₹?\s*([0-9.,]+)/i);
-    if (!match) {
-      match = text.match(/Total\s*₹?\s*([0-9.,]+)/i);
+    // E. Price: STRICT EXTRACTION - Grand Total or Total ONLY
+    // PERMANENT FIX v2 - Normalize text first, no currency symbols in pattern
+    console.log('   [Flipkart Price] Starting strict extraction...');
+    
+    // Step 1: Normalize text - remove all currency symbols for cleaner matching
+    const cleanText = text.replace(/₹/g, '');
+    
+    // Step 2: Priority 1 - Grand Total (most reliable)
+    match = cleanText.match(/Grand\s*Total\s*[:\s]*([0-9.,]+)/i);
+    if (match && match[1]) {
+      const rawAmount = match[1].replace(/,/g, '');
+      const amount = parseFloat(rawAmount);
+      if (!isNaN(amount) && amount > 0) {
+        data.detectedAmount = amount;
+        console.log('   [Flipkart Price] ✅ Grand Total found: ₹' + data.detectedAmount);
+      }
     }
-    if (match) {
-      data.detectedAmount = parseFloat(match[1].replace(/,/g, ''));
-      console.log('   [Flipkart] Amount:', data.detectedAmount);
+    
+    // Step 3: Priority 2 - Total (if Grand Total not found)
+    if (!data.detectedAmount) {
+      match = cleanText.match(/\bTotal\s*[:\s]*([0-9.,]+)/i);
+      if (match && match[1]) {
+        const rawAmount = match[1].replace(/,/g, '');
+        const amount = parseFloat(rawAmount);
+        if (!isNaN(amount) && amount > 0) {
+          data.detectedAmount = amount;
+          console.log('   [Flipkart Price] ✅ Total found: ₹' + data.detectedAmount);
+        }
+      }
+    }
+    
+    // Step 4: Final validation - NO GENERIC FALLBACK FOR FLIPKART
+    if (!data.detectedAmount || data.detectedAmount <= 0) {
+      console.log('   [Flipkart Price] ⚠️ No valid Grand Total or Total found');
+      console.log('   [Flipkart Price] ⚠️ Generic fallback DISABLED for Flipkart');
+      data.detectedAmount = null;
+    } else {
+      console.log('   [Flipkart Price] ✅ Final Amount: ₹' + data.detectedAmount);
     }
     
     // HSN/SAC code
@@ -731,19 +810,50 @@ class OCRService {
 
   /**
    * Clean Flipkart product name
+   * PERMANENT FIX: Stops at first numeric pattern to prevent contamination
    * @param {string} productName - Raw product name
    * @returns {string} Cleaned product name
    */
   cleanFlipkartProductName(productName) {
+    if (!productName) return '';
+    
     let cleaned = productName;
     
-    // Remove trailing numbers and prices (from table columns)
-    cleaned = cleaned.replace(/\s+\d{1,2}\s+[\d\.,\s]+$/g, '');
+    // STEP 1: Stop at currency symbols followed by numbers (₹2999, $50, etc.)
+    // This catches price contamination early
+    const currencyMatch = cleaned.match(/^(.*?)\s*[₹$€£]\s*\d+/);
+    if (currencyMatch && currencyMatch[1]) {
+      cleaned = currencyMatch[1];
+      console.log(`   [Clean] Stopped at currency symbol: "${cleaned}"`);
+    } else {
+      // STEP 2: Stop at first substantial numeric pattern
+      // Pattern matches: space + 2+ digits OR space + digit(s) + decimal + digit(s)
+      // This avoids stopping at single digits that might be part of product names (e.g., "Series 7")
+      const numericMatch = cleaned.match(/^(.*?)\s+(?:\d{2,}|\d+[.,]\d+)/);
+      if (numericMatch && numericMatch[1] && numericMatch[1].length >= 5) {
+        cleaned = numericMatch[1];
+        console.log(`   [Clean] Truncated at numeric pattern: "${cleaned}"`);
+      }
+    }
     
-    // Remove product codes in parentheses
-    cleaned = cleaned.replace(/\s*\(\s*[A-Z0-9]+\s*\)\s*$/gi, ' ');
+    // STEP 3: Remove trailing tax keywords if any
+    cleaned = cleaned.replace(/\s*CGST.*$/i, '');
+    cleaned = cleaned.replace(/\s*SGST.*$/i, '');
+    cleaned = cleaned.replace(/\s*UTGST.*$/i, '');
+    cleaned = cleaned.replace(/\s*IGST.*$/i, '');
     
-    // Remove multiple spaces
+    // STEP 4: Remove any remaining currency symbols and percents
+    cleaned = cleaned.replace(/[₹$€£%]/g, '');
+    
+    // STEP 5: Remove trailing single/double digit numbers that slipped through
+    // Do this before parentheses so we expose any codes at the end
+    cleaned = cleaned.replace(/\s+\d{1,2}\s*$/g, '');
+    
+    // STEP 6: Remove product codes in parentheses at the end
+    // Handles: "Product (ABC123)" or "Product(ABC123)" 
+    cleaned = cleaned.replace(/\s*\([A-Z0-9\s]+\)\s*$/gi, '');
+    
+    // STEP 7: Remove multiple spaces and trim
     cleaned = cleaned.replace(/\s+/g, ' ').trim();
     
     return cleaned;
@@ -868,7 +978,7 @@ class OCRService {
    * @param {string} rawText - Extracted text from invoice
    * @returns {Object} Parsed invoice data
    */
-  parseInvoiceText(rawText) {
+  parseInvoiceText(rawText, metadata = {}) {
     console.log('=== OCR RAW TEXT ===');
     console.log(rawText);
     console.log('=== END RAW TEXT ===\n');
@@ -911,9 +1021,15 @@ class OCRService {
       }
     }
 
+    // Add extraction metadata
+    result.extractionMethod = metadata.method || 'deterministic';
+    result.ocrConfidence = metadata.confidence || 0;
+
     // Log final results
     console.log('\n📊 FINAL EXTRACTION RESULTS:');
     console.log('   Platform:', result.platform);
+    console.log('   Extraction Method:', result.extractionMethod);
+    console.log('   OCR Confidence:', (result.ocrConfidence * 100).toFixed(1) + '%');
     console.log('   Order ID:', result.detectedOrderId || 'N/A');
     console.log('   Invoice Number:', result.detectedInvoiceNumber || 'N/A');
     console.log('   Purchase Date:', result.detectedPurchaseDate || result.detectedOrderDate || 'N/A');
@@ -1544,12 +1660,53 @@ class OCRService {
    */
   async processInvoice(filePath) {
     try {
-      const rawText = await this.extractInvoiceData(filePath);
-      const parsedData = this.parseInvoiceText(rawText);
+      // STEP 1: Extract text using hybrid OCR (PaddleOCR → Tesseract fallback)
+      const ocrResult = await this.extractInvoiceData(filePath);
+      
+      // STEP 2: Parse text with deterministic parsers
+      const parsedData = this.parseInvoiceText(ocrResult.text, {
+        method: ocrResult.method,
+        confidence: ocrResult.confidence
+      });
+      
+      // STEP 3: AI Fallback - if deterministic parsing fails validation
+      const needsAIFallback = this.needsAIFallback(parsedData);
+      
+      if (needsAIFallback) {
+        console.log('\n🤖 TRIGGERING AI FALLBACK - Deterministic parsing insufficient');
+        console.log(`   Reason: ${this.getValidationIssues(parsedData).join(', ')}`);
+        
+        try {
+          // Check if Python AI service is available
+          const isAvailable = await pythonAIService.isServiceAvailable();
+          
+          if (isAvailable) {
+            console.log('   Calling Python AI service for structured extraction...\n');
+            const aiData = await pythonAIService.extractStructuredData(filePath);
+            
+            // Merge AI results with deterministic results (AI takes precedence for missing/invalid fields)
+            const mergedData = this.mergeAIResults(parsedData, aiData);
+            mergedData.extractionMethod = 'ai_fallback';
+            
+            console.log('✅ AI Fallback completed - using enhanced data\n');
+            
+            return {
+              success: true,
+              rawText: ocrResult.text,
+              extractedData: mergedData,
+            };
+          } else {
+            console.log('⚠️  Python AI service unavailable - using deterministic results\n');
+          }
+        } catch (aiError) {
+          console.error('❌ AI fallback failed:', aiError.message);
+          console.log('   Continuing with deterministic results\n');
+        }
+      }
       
       return {
         success: true,
-        rawText,
+        rawText: ocrResult.text,
         extractedData: parsedData,
       };
     } catch (error) {
@@ -1560,6 +1717,106 @@ class OCRService {
         extractedData: null,
       };
     }
+  }
+
+  /**
+   * Check if AI fallback is needed based on validation
+   * @param {Object} data - Parsed invoice data
+   * @returns {boolean}
+   */
+  needsAIFallback(data) {
+    const issues = this.getValidationIssues(data);
+    return issues.length > 0;
+  }
+
+  /**
+   * Get specific validation issues
+   * @param {Object} data - Parsed invoice data
+   * @returns {Array<string>} List of validation issues
+   */
+  getValidationIssues(data) {
+    const issues = [];
+
+    // Check product name
+    if (!data.detectedProductName || data.detectedProductName.length < 5) {
+      issues.push('Product name too short or missing');
+    }
+
+    // Check price
+    const price = parseFloat(data.detectedAmount);
+    if (isNaN(price) || price <= 0 || price < 10) {
+      issues.push('Price invalid or missing');
+    }
+
+    // Check order ID
+    if (!data.detectedOrderId || data.detectedOrderId.length < 5) {
+      issues.push('Order ID missing or invalid');
+    }
+
+    return issues;
+  }
+
+  /**
+   * Merge AI fallback results with deterministic results
+   * AI results take precedence for missing or invalid fields
+   * @param {Object} deterministicData - Results from deterministic parsing
+   * @param {Object} aiData - Results from AI service
+   * @returns {Object} Merged results
+   */
+  mergeAIResults(deterministicData, aiData) {
+    const merged = { ...deterministicData };
+
+    // Product name - use AI if deterministic is invalid
+    if (!merged.detectedProductName || merged.detectedProductName.length < 5) {
+      if (aiData.productName && aiData.productName.length >= 5) {
+        console.log(`   [AI Override] Product: ${aiData.productName}`);
+        merged.detectedProductName = aiData.productName;
+      }
+    }
+
+    // Order ID - use AI if deterministic is invalid
+    if (!merged.detectedOrderId || merged.detectedOrderId.length < 5) {
+      if (aiData.orderId && aiData.orderId.length >= 5) {
+        console.log(`   [AI Override] Order ID: ${aiData.orderId}`);
+        merged.detectedOrderId = aiData.orderId;
+      }
+    }
+
+    // Invoice Number - use AI if deterministic is missing
+    if (!merged.detectedInvoiceNumber) {
+      if (aiData.invoiceNumber) {
+        console.log(`   [AI Override] Invoice Number: ${aiData.invoiceNumber}`);
+        merged.detectedInvoiceNumber = aiData.invoiceNumber;
+      }
+    }
+
+    // Amount - use AI if deterministic is invalid
+    const price = parseFloat(merged.detectedAmount);
+    if (isNaN(price) || price <= 0 || price < 10) {
+      const aiPrice = parseFloat(aiData.totalAmount);
+      if (!isNaN(aiPrice) && aiPrice > 0) {
+        console.log(`   [AI Override] Amount: ₹${aiPrice}`);
+        merged.detectedAmount = aiPrice.toString();
+      }
+    }
+
+    // Purchase Date - use AI if deterministic is missing
+    if (!merged.detectedPurchaseDate && !merged.detectedOrderDate) {
+      if (aiData.purchaseDate) {
+        console.log(`   [AI Override] Purchase Date: ${aiData.purchaseDate}`);
+        merged.detectedPurchaseDate = aiData.purchaseDate;
+      }
+    }
+
+    // Retailer - use AI if deterministic is missing
+    if (!merged.detectedRetailer && !merged.detectedVendor) {
+      if (aiData.retailer) {
+        console.log(`   [AI Override] Retailer: ${aiData.retailer}`);
+        merged.detectedRetailer = aiData.retailer;
+      }
+    }
+
+    return merged;
   }
 }
 
