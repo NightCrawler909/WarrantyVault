@@ -75,15 +75,32 @@ class OCRService {
       if (actualType === 'pdf') {
         console.log('✅ PDF detected - using smart processing pipeline...');
         
-        const pdfResult = await pdfService.processPDF(filePath);
+        // Quick platform detection for multi-page analysis
+        const quickExtract = await pdfService.extractTextFromPDF(filePath);
+        const platform = quickExtract.hasEmbeddedText ? this.detectPlatform(quickExtract.text) : 'generic';
+        
+        console.log(`   Platform detected: ${platform.toUpperCase()}`);
+        
+        // Process PDF with platform info for potential multi-page analysis
+        const pdfResult = await pdfService.processPDF(filePath, { platform });
         
         if (!pdfResult.requiresOCR) {
           // PDF has embedded text - use it directly
-          console.log('✅ Using embedded PDF text (no OCR required)');
+          const method = pdfResult.method === 'multi_page_analysis' 
+            ? 'embedded_pdf_multipage' 
+            : 'embedded_pdf';
+          
+          console.log(`✅ Using embedded PDF text (no OCR required)`);
+          if (pdfResult.selectedPage) {
+            console.log(`   Selected page ${pdfResult.selectedPage} of ${pdfResult.totalPages}`);
+          }
+          
           return {
             text: this.advancedTextCleaning(pdfResult.text),
             confidence: 1.0,
-            method: 'embedded_pdf'
+            method: method,
+            selectedPage: pdfResult.selectedPage,
+            totalPages: pdfResult.totalPages
           };
         }
         
@@ -509,47 +526,69 @@ class OCRService {
    * @returns {number|null} Amount
    */
   extractAmazonPrice(text) {
-    // Priority 1: Look for TOTAL line with ₹
-    let match = text.match(/TOTAL:\s*₹?\s*[0-9.,]+\s*₹?\s*([0-9.,]+)/i);
-    if (match) {
+    console.log('   [Amazon Price] Extracting ALL totals...');
+    const amounts = [];
+    
+    // Extract ALL amounts near TOTAL label using global regex
+    const totalMatches = [...text.matchAll(/TOTAL[:\s]*₹?\s*([0-9.,]+)/gi)];
+    totalMatches.forEach((match, idx) => {
       const amount = parseFloat(match[1].replace(/,/g, ''));
-      if (amount > 0) {
-        console.log('   [Amazon Price] Found via TOTAL line:', amount);
-        return amount;
+      if (!isNaN(amount) && amount > 0) {
+        amounts.push({ amount, source: 'TOTAL', index: idx + 1 });
+        console.log(`   [Amazon Price] Found TOTAL #${idx + 1}: ₹${amount}`);
       }
+    });
+    
+    // Also check Grand Total
+    const grandTotalMatches = [...text.matchAll(/Grand\s*Total[:\s]*₹?\s*([0-9.,]+)/gi)];
+    grandTotalMatches.forEach((match, idx) => {
+      const amount = parseFloat(match[1].replace(/,/g, ''));
+      if (!isNaN(amount) && amount > 0) {
+        amounts.push({ amount, source: 'Grand Total', index: idx + 1 });
+        console.log(`   [Amazon Price] Found Grand Total #${idx + 1}: ₹${amount}`);
+      }
+    });
+    
+    // Also check Total Amount
+    const totalAmountMatches = [...text.matchAll(/Total\s*Amount[:\s]*₹?\s*([0-9.,]+)/gi)];
+    totalAmountMatches.forEach((match, idx) => {
+      const amount = parseFloat(match[1].replace(/,/g, ''));
+      if (!isNaN(amount) && amount > 0) {
+        amounts.push({ amount, source: 'Total Amount', index: idx + 1 });
+        console.log(`   [Amazon Price] Found Total Amount #${idx + 1}: ₹${amount}`);
+      }
+    });
+    
+    // Select the LARGEST amount (product invoice > COD fee)
+    if (amounts.length > 0) {
+      amounts.sort((a, b) => b.amount - a.amount); // Sort by amount descending
+      const largest = amounts[0];
+      
+      console.log(`   [Amazon Price] ✅ Selected LARGEST: ₹${largest.amount} (${largest.source})`);
+      
+      if (amounts.length > 1) {
+        console.log(`   [Amazon Price] Rejected smaller totals: ${amounts.slice(1).map(a => `₹${a.amount}`).join(', ')}`);
+      }
+      
+      return largest.amount;
     }
     
-    // Priority 2: Grand Total
-    match = text.match(/Grand\s*Total\s*₹?\s*([0-9.,]+)/i);
-    if (match) {
-      const amount = parseFloat(match[1].replace(/,/g, ''));
-      if (amount > 0) {
-        console.log('   [Amazon Price] Found via Grand Total:', amount);
-        return amount;
-      }
-    }
-    
-    // Priority 3: Total Amount
-    match = text.match(/Total\s*Amount\s*₹?\s*([0-9.,]+)/i);
-    if (match) {
-      const amount = parseFloat(match[1].replace(/,/g, ''));
-      if (amount > 0) {
-        console.log('   [Amazon Price] Found via Total Amount:', amount);
-        return amount;
-      }
-    }
-    
-    // Priority 4: Extract all ₹ values and use LAST one (likely the total)
+    // Fallback: Extract all ₹ values and use LARGEST
+    console.log('   [Amazon Price] No TOTAL pattern found, checking all ₹ values...');
     const allAmounts = [...text.matchAll(/₹\s*([0-9.,]+)/g)];
     if (allAmounts.length > 0) {
-      const lastAmount = allAmounts[allAmounts.length - 1];
-      const amount = parseFloat(lastAmount[1].replace(/,/g, ''));
-      if (amount > 0 && amount < 1000000) { // Sanity check
-        console.log('   [Amazon Price] Found via last ₹ value:', amount);
-        return amount;
+      const validAmounts = allAmounts
+        .map(m => parseFloat(m[1].replace(/,/g, '')))
+        .filter(a => !isNaN(a) && a > 0 && a < 1000000);
+      
+      if (validAmounts.length > 0) {
+        const maxAmount = Math.max(...validAmounts);
+        console.log(`   [Amazon Price] ✅ Found via LARGEST ₹ value: ₹${maxAmount}`);
+        return maxAmount;
       }
     }
     
+    console.log('   [Amazon Price] ❌ No valid amount found');
     return null;
   }
 

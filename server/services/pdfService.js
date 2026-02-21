@@ -47,6 +47,273 @@ class PDFService {
   }
 
   /**
+   * Extract text per page from PDF (for multi-page analysis)
+   * @param {string} pdfPath - Path to PDF file
+   * @returns {Promise<Array>} Array of page objects with text and metadata
+   */
+  async extractTextPerPage(pdfPath) {
+    try {
+      if (!fs.existsSync(pdfPath)) {
+        throw new Error('PDF file not found');
+      }
+
+      const dataBuffer = fs.readFileSync(pdfPath);
+      const pages = [];
+      let pageTexts = [];
+
+      // Use pdf-parse with page rendering function
+      await new PDFParse({ data: dataBuffer }).getText({
+        pagerender: function(pageData) {
+          return pageData.getTextContent().then(function(textContent) {
+            let pageText = '';
+            textContent.items.forEach(function(item) {
+              pageText += item.str + ' ';
+            });
+            pageTexts.push(pageText.trim());
+          });
+        }
+      });
+
+      // Build page objects
+      for (let i = 0; i < pageTexts.length; i++) {
+        pages.push({
+          pageIndex: i + 1,
+          text: pageTexts[i],
+          length: pageTexts[i].length
+        });
+      }
+
+      console.log(`📄 Extracted text from ${pages.length} pages`);
+      
+      return pages;
+    } catch (error) {
+      console.error('Per-page text extraction error:', error);
+      throw new Error(`Failed to extract text per page: ${error.message}`);
+    }
+  }
+
+  /**
+   * Classify page type (service/COD vs product invoice)
+   * @param {string} text - Page text
+   * @returns {string} 'service', 'product', or 'unknown'
+   */
+  classifyPageType(text) {
+    const lowerText = text.toLowerCase();
+    
+    // SERVICE PAGE INDICATORS
+    const serviceIndicators = [
+      lowerText.includes('service accounting code'),
+      lowerText.includes('cash on delivery'),
+      /\bcod\b/i.test(text),
+      lowerText.includes('amount in words: seven only'),
+      lowerText.includes('amount in words: eight only'),
+      lowerText.includes('amount in words: nine only'),
+      lowerText.includes('amount in words: ten only'),
+      lowerText.includes('delivery charges'),
+      lowerText.includes('cod fee'),
+      lowerText.includes('service fee')
+    ];
+    
+    // Check for very small TOTAL (< 50) - likely service fee
+    const totalMatch = text.match(/TOTAL[:\s]*₹?\s*([0-9.,]+)/i);
+    if (totalMatch) {
+      const amount = parseFloat(totalMatch[1].replace(/,/g, ''));
+      if (!isNaN(amount) && amount < 50) {
+        serviceIndicators.push(true);
+      }
+    }
+    
+    const serviceScore = serviceIndicators.filter(Boolean).length;
+    
+    // PRODUCT PAGE INDICATORS
+    const productIndicators = [
+      /hsn[:\s]*\d{8}/i.test(text), // 8-digit HSN
+      /B0[A-Z0-9]{8}/.test(text), // Amazon ASIN
+      lowerText.includes('unit price'),
+      lowerText.includes('qty'),
+      lowerText.includes('description'),
+      text.match(/\b1\s+[A-Za-z]{30,}/) !== null, // Long product description
+      lowerText.includes('product'),
+      lowerText.includes('item')
+    ];
+    
+    const productScore = productIndicators.filter(Boolean).length;
+    
+    // Classification logic
+    if (serviceScore >= 2) {
+      return 'service';
+    }
+    
+    if (productScore >= 3) {
+      return 'product';
+    }
+    
+    // If has high total amount, likely product
+    if (totalMatch) {
+      const amount = parseFloat(totalMatch[1].replace(/,/g, ''));
+      if (!isNaN(amount) && amount >= 100) {
+        return 'product';
+      }
+    }
+    
+    return 'unknown';
+  }
+
+  /**
+   * Analyze pages with robust scoring system (for multi-page invoice selection)
+   * @param {Array} pages - Array of page objects with text
+   * @returns {Array} Pages with scores and detected total amounts
+   */
+  analyzePages(pages) {
+    const analyzedPages = [];
+
+    for (const page of pages) {
+      let score = 0;
+      const lowerText = page.text.toLowerCase();
+      
+      // STEP 1: Apply NEGATIVE scores for service/COD indicators
+      if (lowerText.includes('service accounting code')) {
+        score -= 50;
+        console.log(`   [Page ${page.pageIndex}] -50: Service Accounting Code`);
+      }
+      if (lowerText.includes('cash on delivery') || lowerText.includes('pay on delivery')) {
+        score -= 50;
+        console.log(`   [Page ${page.pageIndex}] -50: Cash/Pay on Delivery`);
+      }
+      if (/\bcod\b/i.test(page.text)) {
+        score -= 50;
+        console.log(`   [Page ${page.pageIndex}] -50: COD`);
+      }
+      if (lowerText.includes('amount in words: seven only') || 
+          lowerText.includes('amount in words: eight only') ||
+          lowerText.includes('amount in words: nine only') ||
+          lowerText.includes('amount in words: ten only')) {
+        score -= 50;
+        console.log(`   [Page ${page.pageIndex}] -50: Small amount in words`);
+      }
+      
+      // STEP 2: Apply POSITIVE scores for product indicators
+      if (/hsn[:\s]*\d{8}/i.test(page.text)) {
+        score += 20;
+        console.log(`   [Page ${page.pageIndex}] +20: HSN (8 digits)`);
+      }
+      if (lowerText.includes('unit price')) {
+        score += 20;
+        console.log(`   [Page ${page.pageIndex}] +20: Unit Price column`);
+      }
+      if (lowerText.includes('qty')) {
+        score += 20;
+        console.log(`   [Page ${page.pageIndex}] +20: Qty column`);
+      }
+      
+      // Check for long product description (> 40 chars)
+      const descMatch = page.text.match(/\b1\s+([A-Za-z0-9\s]{40,})/);
+      if (descMatch) {
+        score += 30;
+        console.log(`   [Page ${page.pageIndex}] +30: Long product description`);
+      }
+      
+      // Check for Amazon ASIN
+      if (/B0[A-Z0-9]{8}/.test(page.text)) {
+        score += 30;
+        console.log(`   [Page ${page.pageIndex}] +30: Amazon ASIN`);
+      }
+      
+      // STEP 3: Extract ALL totals and find largest
+      const totalMatches = [...page.text.matchAll(/TOTAL[:\s]*₹?\s*([0-9.,]+)/gi)];
+      let maxTotal = 0;
+      
+      totalMatches.forEach(match => {
+        const amount = parseFloat(match[1].replace(/,/g, ''));
+        if (!isNaN(amount) && amount > 0) {
+          if (amount > maxTotal) {
+            maxTotal = amount;
+          }
+        }
+      });
+      
+      // Also check Grand Total
+      const grandTotalMatches = [...page.text.matchAll(/Grand\s*Total[:\s]*₹?\s*([0-9.,]+)/gi)];
+      grandTotalMatches.forEach(match => {
+        const amount = parseFloat(match[1].replace(/,/g, ''));
+        if (!isNaN(amount) && amount > 0) {
+          if (amount > maxTotal) {
+            maxTotal = amount;
+          }
+        }
+      });
+      
+      // STEP 4: Apply score modifiers based on total amount
+      if (maxTotal > 100) {
+        score += 40;
+        console.log(`   [Page ${page.pageIndex}] +40: Total > ₹100 (₹${maxTotal})`);
+      } else if (maxTotal > 0 && maxTotal < 50) {
+        score -= 30;
+        console.log(`   [Page ${page.pageIndex}] -30: Total < ₹50 (₹${maxTotal})`);
+      }
+      
+      const analysis = {
+        pageIndex: page.pageIndex,
+        text: page.text,
+        score: score,
+        maxTotal: maxTotal,
+        totalAmount: maxTotal, // For backward compatibility
+        pageType: score < 0 ? 'service' : (score > 50 ? 'product' : 'unknown'),
+        hasProductIndicators: score > 0
+      };
+
+      analyzedPages.push(analysis);
+    }
+
+    return analyzedPages;
+  }
+
+  /**
+   * Select best page from multi-page PDF (robust scoring-based selection)
+   * @param {Array} analyzedPages - Pages with analysis
+   * @returns {Object} Best page
+   */
+  selectBestPage(analyzedPages) {
+    if (!analyzedPages || analyzedPages.length === 0) {
+      return null;
+    }
+
+    // DEBUG LOGGING: Show all page scores
+    console.log(`\n📊 PAGE SCORES:`, analyzedPages.map(p => ({
+      index: p.pageIndex,
+      score: p.score,
+      maxTotal: p.maxTotal,
+      type: p.pageType
+    })));
+
+    console.log(`\n📋 Detailed Multi-page Analysis:`);
+    analyzedPages.forEach(page => {
+      const emoji = page.pageType === 'service' ? '🚫' : (page.pageType === 'product' ? '✅' : '❓');
+      console.log(`${emoji} Page ${page.pageIndex}: Score=${page.score}, Total=₹${page.maxTotal || 'N/A'}, Type=${page.pageType.toUpperCase()}`);
+    });
+
+    // STEP 1: Sort by score (highest first)
+    const sortedByScore = [...analyzedPages].sort((a, b) => b.score - a.score);
+    
+    // STEP 2: If top scores are tied, use maxTotal as tiebreaker
+    const topScore = sortedByScore[0].score;
+    const topPages = sortedByScore.filter(p => p.score === topScore);
+    
+    let bestPage;
+    if (topPages.length > 1) {
+      console.log(`\n⚖️  TIE detected (${topPages.length} pages with score ${topScore})`);
+      console.log('   Using maxTotal as tiebreaker...');
+      bestPage = topPages.sort((a, b) => b.maxTotal - a.maxTotal)[0];
+    } else {
+      bestPage = sortedByScore[0];
+    }
+
+    console.log(`\n✅ SELECTED: Page ${bestPage.pageIndex} (Score: ${bestPage.score}, Total: ₹${bestPage.maxTotal || 'N/A'}, Type: ${bestPage.pageType.toUpperCase()})\n`);
+
+    return bestPage;
+  }
+
+  /**
    * Convert PDF to high-quality PNG image for OCR
    * @param {string} pdfPath - Path to PDF file
    * @param {Object} options - Conversion options
@@ -97,10 +364,12 @@ class PDFService {
 
   /**
    * Smart PDF processing - tries text extraction first, falls back to image conversion
+   * Supports multi-page analysis for Amazon invoices
    * @param {string} pdfPath - Path to PDF file
+   * @param {Object} options - Processing options (e.g., { platform: 'amazon' })
    * @returns {Promise<Object>} Processing result with method used
    */
-  async processPDF(pdfPath) {
+  async processPDF(pdfPath, options = {}) {
     try {
       console.log('\n📋 Smart PDF Processing...');
       
@@ -111,6 +380,41 @@ class PDFService {
       // Step 2: Check if PDF has sufficient embedded text
       if (extractResult.hasEmbeddedText) {
         console.log('✅ PDF contains embedded text (digital PDF)');
+        
+        // Step 2.5: For Amazon PDFs, perform multi-page analysis
+        if (options.platform === 'amazon') {
+          console.log('🔷 Amazon PDF detected - checking for multiple pages...');
+          
+          try {
+            const pages = await this.extractTextPerPage(pdfPath);
+            
+            if (pages.length > 1) {
+              console.log(`📄 Multi-page PDF detected (${pages.length} pages)`);
+              console.log('   Analyzing pages to find product invoice...');
+              
+              const analyzedPages = this.analyzePages(pages);
+              const bestPage = this.selectBestPage(analyzedPages);
+              
+              if (bestPage) {
+                return {
+                  method: 'multi_page_analysis',
+                  text: bestPage.text,
+                  requiresOCR: false,
+                  imagePath: null,
+                  selectedPage: bestPage.pageIndex,
+                  totalPages: pages.length,
+                  pageAnalysis: analyzedPages
+                };
+              }
+            } else {
+              console.log('   Single-page PDF - using standard extraction');
+            }
+          } catch (pageError) {
+            console.warn('⚠️  Page-level extraction failed, using full document:', pageError.message);
+            // Fall through to standard processing
+          }
+        }
+        
         console.log('   Using direct extraction - NO OCR needed');
         return {
           method: 'direct_text_extraction',
