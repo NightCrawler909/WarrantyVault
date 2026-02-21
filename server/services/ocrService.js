@@ -1,10 +1,42 @@
 const Tesseract = require('tesseract.js');
 const path = require('path');
 const fs = require('fs');
+const pdfService = require('./pdfService');
 
 class OCRService {
   /**
-   * Extract text from invoice image
+   * Detect actual file type by reading magic bytes
+   * @param {string} filePath - Path to file
+   * @returns {string} Actual file type ('pdf', 'jpg', 'png', 'unknown')
+   */
+  detectFileType(filePath) {
+    try {
+      const buffer = fs.readFileSync(filePath);
+      
+      // Check PDF signature (magic bytes)
+      if (buffer.length >= 4 && buffer[0] === 0x25 && buffer[1] === 0x50 && buffer[2] === 0x44 && buffer[3] === 0x46) {
+        return 'pdf'; // %PDF
+      }
+      
+      // Check PNG signature
+      if (buffer.length >= 8 && buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47) {
+        return 'png'; // PNG
+      }
+      
+      // Check JPEG signature
+      if (buffer.length >= 3 && buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) {
+        return 'jpg'; // JPEG
+      }
+      
+      return 'unknown';
+    } catch (error) {
+      console.error('Error detecting file type:', error);
+      return 'unknown';
+    }
+  }
+
+  /**
+   * Extract text from invoice image or PDF
    * @param {string} filePath - Path to the invoice file
    * @returns {Promise<string>} Extracted text
    */
@@ -14,14 +46,37 @@ class OCRService {
         throw new Error('Invoice file not found');
       }
 
-      // Check file extension - Tesseract only supports images
       const ext = path.extname(filePath).toLowerCase();
-      const supportedFormats = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif', '.gif', '.webp'];
+      const actualType = this.detectFileType(filePath);
       
-      if (!supportedFormats.includes(ext)) {
-        throw new Error(`OCR only supports image formats (JPG, PNG, etc.). PDF files cannot be processed. Please upload an image of your invoice instead.`);
+      console.log(`📄 Processing file: ${path.basename(filePath)}`);
+      console.log(`   Extension: ${ext}, Actual type: ${actualType}`);
+      
+      // If it's actually a PDF (regardless of extension), extract text directly without OCR
+      if (actualType === 'pdf') {
+        console.log('✅ PDF detected (by content), using direct text extraction (no OCR)...');
+        const extractedText = await pdfService.extractTextFromPDF(filePath);
+        console.log('✅ PDF text extracted successfully');
+        return this.cleanText(extractedText);
+      }
+      
+      // Check if it's a recognized image format
+      const supportedImageTypes = ['jpg', 'png'];
+      
+      if (actualType !== 'unknown' && !supportedImageTypes.includes(actualType)) {
+        throw new Error(`Unsupported file type detected. File appears to be: ${actualType}. Please upload JPG, PNG, or PDF files.`);
+      }
+      
+      // If type is unknown, fall back to extension check
+      if (actualType === 'unknown') {
+        const supportedExtensions = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif', '.gif', '.webp'];
+        if (!supportedExtensions.includes(ext)) {
+          throw new Error(`Unsupported file format: ${ext}. Please upload JPG, PNG, or PDF files.`);
+        }
       }
 
+      console.log('🖼️  Image detected, using Tesseract OCR...');
+      
       // Use Tesseract to extract text with better configuration
       const result = await Tesseract.recognize(filePath, 'eng', {
         logger: (m) => {
@@ -34,14 +89,11 @@ class OCRService {
         tessjs_create_hocr: '0',
       });
 
+      console.log('✅ OCR extraction completed');
       return this.cleanText(result.data.text);
     } catch (error) {
-      console.error('OCR extraction error:', error);
-      // Re-throw with original message if it's our validation error
-      if (error.message.includes('OCR only supports')) {
-        throw error;
-      }
-      throw new Error('Failed to extract text from invoice');
+      console.error('❌ OCR extraction error:', error);
+      throw new Error(`Failed to extract text from invoice: ${error.message}`);
     }
   }
 
@@ -86,10 +138,12 @@ class OCRService {
     console.log('Detected Order ID:', result.detectedOrderId);
 
     // Extract vendor/store name
+    console.log('\n🏪 Extracting Vendor...');
     result.detectedVendor = this.extractVendor(rawText);
     console.log('Detected Vendor:', result.detectedVendor);
 
     // Extract product name
+    console.log('\n📦 Extracting Product Name...');
     result.detectedProductName = this.extractProductName(rawText);
     console.log('Detected Product:', result.detectedProductName);
 
@@ -116,13 +170,40 @@ class OCRService {
    * @returns {string|null} Detected date in YYYY-MM-DD format
    */
   extractDate(text) {
+    // Priority 1: Look for dates with contextual labels (Invoice Date, Order Date)
+    const contextualPatterns = [
+      /(?:Invoice\s+Date|Order\s+Date|Date)[:\s]*(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/i,
+      /(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\s*(?:Invoice\s+Date|Order\s+Date)/i,
+    ];
+
+    for (const pattern of contextualPatterns) {
+      const match = text.match(pattern);
+      if (match) {
+        try {
+          // DD-MM-YYYY format (common in Indian invoices)
+          const day = parseInt(match[1]);
+          const month = parseInt(match[2]);
+          const year = parseInt(match[3]);
+          
+          // Validate the date makes sense
+          if (day >= 1 && day <= 31 && month >= 1 && month <= 12 && year >= 2000 && year <= 2100) {
+            const dateObj = new Date(year, month - 1, day);
+            if (!isNaN(dateObj.getTime())) {
+              return dateObj.toISOString().split('T')[0];
+            }
+          }
+        } catch (error) {
+          continue;
+        }
+      }
+    }
+    
+    // Priority 2: General date patterns (as fallback)
     const datePatterns = [
-      // DD/MM/YYYY or DD-MM-YYYY
-      /\b(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\b/,
-      // MM/DD/YYYY or MM-DD-YYYY
-      /\b(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\b/,
-      // YYYY-MM-DD or YYYY/MM/DD
-      /\b(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})\b/,
+      // DD/MM/YYYY or DD-MM-YYYY or DD.MM.YYYY (Amazon uses dots)
+      /\b(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})\b/,
+      // YYYY-MM-DD or YYYY/MM/DD or YYYY.MM.DD
+      /\b(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})\b/,
       // DD Month YYYY (e.g., 25 January 2024)
       /\b(\d{1,2})\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})\b/i,
     ];
@@ -134,7 +215,7 @@ class OCRService {
           // Try to parse the date
           let dateObj;
           
-          if (match[0].includes('January') || match[0].includes('February')) {
+          if (match[0].includes('January') || match[0].includes('February') || /[A-Za-z]/.test(match[0])) {
             // Month name format
             const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 
                                 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -144,11 +225,18 @@ class OCRService {
             // YYYY-MM-DD format
             dateObj = new Date(match[1], match[2] - 1, match[3]);
           } else {
-            // DD/MM/YYYY format (assuming day first)
-            dateObj = new Date(match[3], match[2] - 1, match[1]);
+            // DD/MM/YYYY format (assuming day first - common in India)
+            const day = parseInt(match[1]);
+            const month = parseInt(match[2]);
+            const year = parseInt(match[3]);
+            
+            // Validate reasonable date ranges
+            if (day >= 1 && day <= 31 && month >= 1 && month <= 12) {
+              dateObj = new Date(year, month - 1, day);
+            }
           }
 
-          if (!isNaN(dateObj.getTime())) {
+          if (dateObj && !isNaN(dateObj.getTime())) {
             return dateObj.toISOString().split('T')[0];
           }
         } catch (error) {
@@ -184,48 +272,64 @@ class OCRService {
     // Step 2: Define detection patterns in priority order
     
     // Pattern 1: Explicit Order ID with label
-    const pattern1 = /Order\s*ID[:\s]*([A-Z0-9]{10,25})/i;
+    const pattern1 = /Order\s*(?:ID|Number)[:\s]*([A-Z0-9\-]{10,30})/i;
     
-    // Pattern 2: Flipkart style (OD followed by 10-20 digits)
-    const pattern2 = /\bOD[0-9]{10,20}\b/;
+    // Pattern 2: Amazon style (171-4078830-4755561) - number-number-number
+    const pattern2 = /\b\d{3}-\d{7,10}-\d{7,10}\b/;
     
-    // Pattern 3: Invoice Number fallback
-    const pattern3 = /Invoice\s*(?:Number|No\.?)[:\s#]*([A-Z0-9\-]{6,25})/i;
+    // Pattern 3: Flipkart style (OD followed by 10-20 digits)
+    const pattern3 = /\bOD[0-9]{10,20}\b/;
     
-    // Pattern 4: Multiline case (Order and ID on separate lines)
-    const pattern4 = /Order[\s\n]*ID[:\s]*([A-Z0-9]{10,25})/i;
+    // Pattern 4: Invoice Number fallback
+    const pattern4 = /Invoice\s*(?:Number|No\.?)[:\s#]*([A-Z0-9\-]{6,25})/i;
+    
+    // Pattern 5: Multiline case (Order and ID on separate lines)
+    const pattern5 = /Order[\s\n]*(?:ID|Number)[:\s]*([A-Z0-9\-]{10,30})/i;
 
     // Step 3: Try patterns in safe matching order
     
-    // Try Pattern 1: Explicit Order ID
+    // Try Pattern 1: Explicit Order ID/Number
     let match = normalizedText.match(pattern1);
     if (match && match[1]) {
       const orderId = match[1].trim();
       if (this.isValidOrderId(orderId)) {
+        console.log('   [OrderID] Found via explicit pattern:', orderId);
         return orderId;
       }
     }
 
-    // Try Pattern 4: Multiline Order ID
-    match = normalizedText.match(pattern4);
-    if (match && match[1]) {
-      const orderId = match[1].trim();
-      if (this.isValidOrderId(orderId)) {
-        return orderId;
-      }
-    }
-
-    // Try Pattern 2: Flipkart style OD prefix
+    // Try Pattern 2: Amazon style (xxx-xxxxxxx-xxxxxxx)
     match = normalizedText.match(pattern2);
     if (match) {
       const orderId = match[0].trim();
       if (this.isValidOrderId(orderId)) {
+        console.log('   [OrderID] Found via Amazon pattern:', orderId);
         return orderId;
       }
     }
 
-    // Try Pattern 3: Invoice Number as fallback
+    // Try Pattern 3: Flipkart style OD prefix
     match = normalizedText.match(pattern3);
+    if (match) {
+      const orderId = match[0].trim();
+      if (this.isValidOrderId(orderId)) {
+        console.log('   [OrderID] Found via Flipkart pattern:', orderId);
+        return orderId;
+      }
+    }
+
+    // Try Pattern 5: Multiline Order ID
+    match = normalizedText.match(pattern5);
+    if (match && match[1]) {
+      const orderId = match[1].trim();
+      if (this.isValidOrderId(orderId)) {
+        console.log('   [OrderID] Found via multiline pattern:', orderId);
+        return orderId;
+      }
+    }
+
+    // Try Pattern 4: Invoice Number as fallback
+    match = normalizedText.match(pattern4);
     if (match && match[1]) {
       const orderId = match[1].trim();
       if (this.isValidOrderId(orderId)) {
@@ -276,46 +380,126 @@ class OCRService {
     // Words that indicate table headers or metadata (not product names)
     const tableHeaderWords = ['qty', 'quantity', 'price', 'amount', 'total', 'subtotal', 
                               'discount', 'tax', 'cgst', 'sgst', 'igst', 'gst', 'gross', 
-                              'taxable', 'rate', 'hsn', 'sac', 'unit'];
+                              'taxable', 'rate', 'hsn', 'sac', 'unit', 'coupons', 'value'];
     
     // Look for product/item keywords
-    const productKeywords = ['product', 'item', 'description', 'article', 'particulars'];
+    const productKeywords = ['product', 'title', 'item', 'description', 'article', 'particulars'];
     
+    // Pattern 1: Look for lines after product table headers
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].toLowerCase();
       
       // If line contains product keyword, look ahead for actual product name
       if (productKeywords.some(keyword => line.includes(keyword))) {
-        // Check next few lines for product name (skip table headers)
-        for (let j = i + 1; j < Math.min(i + 5, lines.length); j++) {
+        console.log('   [Product] Found product keyword at line', i, ':', lines[i]);
+        
+        // Check next few lines for product name (skip table headers and metadata)
+        for (let j = i + 1; j < Math.min(i + 25, lines.length); j++) {
           let potentialProduct = lines[j];
           const lowerProduct = potentialProduct.toLowerCase();
+          
+          // Skip obviously bad lines
+          if (potentialProduct.startsWith('/') || 
+              potentialProduct.startsWith('*') ||
+              /^e\s*\.\s*&\s*o\s*\.\s*e\s*\./i.test(potentialProduct) ||
+              /^page\s+\d+\s+of\s+\d+/i.test(potentialProduct) ||
+              /^(fsn|hsn|sac|sku|warranty|cgst|sgst|igst|shipping|total|utgst)[:\s]/i.test(potentialProduct)) {
+            continue;
+          }
+          
+          // Skip single-word currency/unit lines (like "Value ₹", "Amount ₹")
+          if (/^(value|amount|gross|discount|taxable)\s*[₹\$€£]?\s*$/i.test(potentialProduct)) {
+            console.log('   [Product] Skipping currency line at line', j, ':', potentialProduct);
+            continue;
+          }
+          
+          // Skip lines that are just currency symbols or numbers
+          if (/^[₹\$€£\d\s\.,]+$/.test(potentialProduct)) {
+            continue;
+          }
           
           // Skip if it's a table header row (contains multiple header keywords)
           const headerWordCount = tableHeaderWords.filter(word => 
             lowerProduct.includes(word)
           ).length;
           
-          if (headerWordCount >= 3) {
-            continue; // This is likely a table header, skip it
+          if (headerWordCount >= 2) {
+            console.log('   [Product] Skipping table header at line', j, ':', potentialProduct.substring(0, 50));
+            continue;
           }
           
           // Clean the product name (remove trailing numbers/prices from table)
           potentialProduct = this.cleanProductName(potentialProduct);
           
-          // Validate it's a reasonable product name
-          if (potentialProduct.length > 5 && potentialProduct.length < 100 && 
-              !/^[\d\.\$\₹\€\£\,\s]+$/.test(potentialProduct) &&
+          // Check if product name continues on next line (for PDF multi-line names)
+          // Amazon products can be very long (100+ chars), so increase limit to 200
+          if (potentialProduct.length > 5 && potentialProduct.length < 200 && 
+              !/^[\d\.\$\₹\€\£\,\s\/]+$/.test(potentialProduct) &&
               headerWordCount === 0) {
-            return potentialProduct;
+            
+            // Try to merge with next lines if they look like a continuation (Amazon descriptions are multi-line)
+            let mergedProduct = potentialProduct;
+            let linesChecked = 0;
+            
+            for (let k = j + 1; k < Math.min(j + 8, lines.length) && linesChecked < 5; k++) {
+              const nextLine = lines[k];
+              const nextLower = nextLine.toLowerCase();
+              
+              // Stop if we hit metadata lines
+              if (/^(fsn|hsn|sac|warranty|cgst|sgst|igst|shipping|total)[:\s]/i.test(nextLine)) {
+                break;
+              }
+              
+              // Stop if we hit table structure or numbers
+              if (/^[\d\.,₹\$€£\s]+$/.test(nextLine) || nextLine.startsWith('/')) {
+                break;
+              }
+              
+              const nextHeaderCount = tableHeaderWords.filter(word => nextLower.includes(word)).length;
+              
+              // If next line has multiple header words, we've hit the next row
+              if (nextHeaderCount >= 2) {
+                break;
+              }
+              
+              // Merge lines that appear to be product description continuation
+              if (nextLine.length > 0 && nextLine.length < 150 && nextHeaderCount === 0) {
+                const cleanedNext = this.cleanProductName(nextLine);
+                if (cleanedNext.length > 5 && mergedProduct.length + cleanedNext.length < 200) {
+                  mergedProduct = `${mergedProduct} ${cleanedNext}`.trim();
+                  console.log('   [Product] Merged line', k, ':', cleanedNext.substring(0, 50));
+                  linesChecked++;
+                } else {
+                  break;
+                }
+              } else {
+                break;
+              }
+            }
+            
+            console.log('   [Product] Found:', mergedProduct);
+            return mergedProduct;
           }
         }
       }
     }
 
+    console.log('   [Product] Fallback search starting...');
+    
     // Fallback: look for lines that might be product names
-    for (let line of lines) {
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
       const lowerLine = line.toLowerCase();
+      
+      // Skip bad matches
+      if (line.startsWith('/') || 
+          line.startsWith('*') ||
+          /^e\s*\.\s*&\s*o\s*\.\s*e\s*\./i.test(line) ||
+          /^page\s+\d+\s+of\s+\d+/i.test(line) ||
+          /^(fsn|hsn|sac|sku|warranty|cgst|sgst|shipping)[:\s]/i.test(line) ||
+          /^(value|amount|gross|discount|taxable)\s*[₹\$€£]?\s*$/i.test(line)) {
+        continue;
+      }
       
       // Count how many table header words are in this line
       const headerWordCount = tableHeaderWords.filter(word => 
@@ -329,13 +513,16 @@ class OCRService {
       const cleanedLine = this.cleanProductName(line);
       
       // Skip short lines, numeric lines, and lines with common invoice terms
-      if (cleanedLine.length > 10 && cleanedLine.length < 100 && 
-          !/^[\d\.\$\₹\€\£\,\s]+$/.test(cleanedLine) &&
-          !/invoice|receipt|order|date|bill|payment|customer|seller|vendor/i.test(cleanedLine)) {
+      // Allow longer product names (up to 200 chars for Amazon)
+      if (cleanedLine.length > 10 && cleanedLine.length < 200 && 
+          !/^[\d\.\$\₹\€\£\,\s\/]+$/.test(cleanedLine) &&
+          !/invoice|receipt|order|date|bill|payment|customer|seller|vendor|e\s*\.\s*&\s*o\s*\.\s*e\s*\./i.test(cleanedLine)) {
+        console.log('   [Product] Found via fallback:', cleanedLine);
         return cleanedLine;
       }
     }
 
+    console.log('   [Product] Not found');
     return null;
   }
 
@@ -353,6 +540,9 @@ class OCRService {
     const qtyPricePattern = /\s+\d{1,2}\s+[\d\.,\s]+$/;
     let cleaned = productName.replace(qtyPricePattern, '');
     
+    // Remove product codes in parentheses at the end (e.g., "( B0BTM24FN )")
+    cleaned = cleaned.replace(/\s*\(\s*[A-Z0-9]+\s*\)\s*$/i, '');
+    
     // Also remove trailing isolated numbers/prices
     cleaned = cleaned.replace(/\s+[\d\.,]+\s*$/g, '').trim();
     
@@ -368,15 +558,46 @@ class OCRService {
    * @returns {string|null}
    */
   extractVendor(text) {
+    // Priority 1: Look for "Sold By:" pattern (Flipkart/Amazon) - most reliable
+    const soldByPatterns = [
+      /Sold\s+By[:\s]+([A-Za-z0-9\s\-\.,&]+?)(?:\s*,\s*|\n|$)/i,
+      /Sold\s+By[:\s]+([A-Za-z0-9\s\-\.&]+?)\s*(?:Ltd|Limited|Private|Pvt|Inc|Corp|LLC)/i,
+    ];
+    
+    for (const pattern of soldByPatterns) {
+      const match = text.match(pattern);
+      if (match && match[1]) {
+        let vendorName = match[1].trim();
+        // Include company suffix if it exists
+        if (pattern.toString().includes('Ltd|Limited')) {
+          const suffixMatch = text.substring(match.index + match[0].length - 10).match(/^(Ltd|Limited|Private|Pvt|Inc|Corp|LLC)/i);
+          if (suffixMatch) {
+            vendorName += ' ' + suffixMatch[1];
+          }
+        }
+        vendorName = this.cleanVendorName(vendorName);
+        if (vendorName.length > 3 && vendorName.length < 100) {
+          console.log('   [Vendor] Found via Sold By pattern:', vendorName);
+          return vendorName;
+        }
+      }
+    }
+
     const lines = text.split('\n').map(line => line.trim()).filter(Boolean);
     
-    // Vendor name is often at the top of the invoice
-    // Look for lines before common invoice terms appear
+    // Priority 2: Look for vendor keywords in lines
     const vendorKeywords = ['sold by', 'from', 'seller', 'vendor', 'store', 'company'];
     
-    for (let i = 0; i < Math.min(10, lines.length); i++) {
+    for (let i = 0; i < Math.min(20, lines.length); i++) {
       const line = lines[i];
       const lowerLine = line.toLowerCase();
+      
+      // Skip obviously bad matches
+      if (/^e\s*\.\s*&\s*o\s*\.\s*e\s*\./i.test(line) || 
+          /^page\s+\d+\s+of\s+\d+/i.test(line) ||
+          /^\*?keep\s+this/i.test(line)) {
+        continue;
+      }
       
       // Check if line contains vendor keywords with the name in same line
       for (const keyword of vendorKeywords) {
@@ -391,7 +612,8 @@ class OCRService {
           // Clean up common OCR artifacts and trailing junk
           vendorName = this.cleanVendorName(vendorName);
           
-          if (vendorName.length > 3 && vendorName.length < 80) {
+          if (vendorName.length > 3 && vendorName.length < 100) {
+            console.log('   [Vendor] Found via keyword inline:', vendorName);
             return vendorName;
           }
         }
@@ -403,24 +625,28 @@ class OCRService {
         let potentialVendor = lines[i + 1];
         potentialVendor = this.cleanVendorName(potentialVendor);
         
-        if (potentialVendor.length > 3 && potentialVendor.length < 80 &&
+        if (potentialVendor.length > 3 && potentialVendor.length < 100 &&
             !/^\d+$/.test(potentialVendor) &&
-            !/invoice|receipt|bill|date/i.test(potentialVendor)) {
+            !/invoice|receipt|bill|date|e\s*\.\s*&\s*o\s*\.\s*e\s*\./i.test(potentialVendor)) {
+          console.log('   [Vendor] Found via keyword nextline:', potentialVendor);
           return potentialVendor;
         }
       }
       
-      // First non-empty line that looks like a company name
-      if (i < 3 && line.length > 3 && line.length < 60 &&
-          !/invoice|receipt|bill|order|date|tax|total/i.test(lowerLine) &&
+      // First non-empty line that looks like a company name (LOWEST priority)
+      if (i < 5 && line.length > 3 && line.length < 60 &&
+          !/invoice|receipt|bill|order|date|tax|total|e\s*\.\s*&\s*o\s*\.\s*e\s*\.|keep\s+this|page\s+\d+/i.test(lowerLine) &&
           !/^\d+$/.test(line)) {
         // Check if it has capital letters or company indicators
-        if (/[A-Z]/.test(line) || /ltd|llc|inc|pvt|private|limited|corp/i.test(line)) {
-          return this.cleanVendorName(line);
+        if (/[A-Z]/.test(line) && /ltd|llc|inc|pvt|private|limited|corp/i.test(line)) {
+          const cleaned = this.cleanVendorName(line);
+          console.log('   [Vendor] Found via company name heuristic:', cleaned);
+          return cleaned;
         }
       }
     }
     
+    console.log('   [Vendor] Not found');
     return null;
   }
 
@@ -430,8 +656,11 @@ class OCRService {
    * @returns {string} Cleaned vendor name
    */
   cleanVendorName(vendorName) {
-    // Remove trailing commas and junk characters
-    let cleaned = vendorName.replace(/[,;]\s*[A-Za-z]{1,2}\s+[a-z]{1,3}\)?\s*$/i, '');
+    // Remove trailing commas and then any trailing short words (like "a", "an", etc.)
+    let cleaned = vendorName.replace(/\s*,\s*$/g, '').trim();
+    
+    // Remove trailing single letters or short junk (like ", a" or ", an")
+    cleaned = cleaned.replace(/[,;]\s*[A-Za-z]{1,2}\s*$/i, '');
     
     // Remove trailing parentheses with short content
     cleaned = cleaned.replace(/\s*\([^)]{1,5}\)\s*$/g, '');

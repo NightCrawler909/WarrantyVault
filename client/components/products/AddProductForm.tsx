@@ -50,10 +50,10 @@ export const AddProductForm = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Validate file type
-    const allowedTypes = ['image/jpeg', 'image/png'];
+    // Validate file type - now accepts PDF too!
+    const allowedTypes = ['image/jpeg', 'image/png', 'application/pdf'];
     if (!allowedTypes.includes(file.type)) {
-      toast.error('Please upload a JPG or PNG image');
+      toast.error('Please upload a JPG, PNG, or PDF file');
       return;
     }
 
@@ -64,7 +64,8 @@ export const AddProductForm = () => {
     }
 
     setInvoiceFile(file);
-    toast.success('Invoice uploaded! Click "Extract Data" to auto-fill form.');
+    const fileType = file.type === 'application/pdf' ? 'PDF' : 'image';
+    toast.success(`${fileType} uploaded! Click "Extract Data" to auto-fill form.`);
   };
 
   const handleExtractData = async () => {
@@ -109,13 +110,7 @@ export const AddProductForm = () => {
       toast.success('Data extracted! Review and submit the form.');
     } catch (error: any) {
       const message = error.response?.data?.message || 'Failed to extract invoice data';
-      
-      if (message.includes('OCR only supports')) {
-        toast.error('PDF files are not supported', { duration: 5000 });
-        toast('Please upload a JPG or PNG image instead', { icon: '💡', duration: 5000 });
-      } else {
-        toast.error(message, { duration: 4000 });
-      }
+      toast.error(message, { duration: 4000 });
     } finally {
       setIsExtracting(false);
     }
@@ -227,7 +222,7 @@ export const AddProductForm = () => {
             {/* Info Banner */}
             <div className="p-4 bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-xl">
               <p className="text-sm text-purple-900 leading-relaxed">
-                <span className="font-semibold">✨ AI-Powered Extraction:</span> Upload your invoice image 
+                <span className="font-semibold">✨ AI-Powered Extraction:</span> Upload your invoice (PDF, JPG, or PNG) 
                 and we'll automatically extract product name, order ID, price, retailer, and more!
               </p>
             </div>
@@ -239,7 +234,7 @@ export const AddProductForm = () => {
                 <input
                   type="file"
                   id="invoice-upload"
-                  accept="image/jpeg,image/png"
+                  accept="image/jpeg,image/png,application/pdf"
                   onChange={handleInvoiceUpload}
                   className="hidden"
                 />
@@ -255,7 +250,7 @@ export const AddProductForm = () => {
                       Click to upload invoice
                     </p>
                     <p className="text-sm text-neutral-500">
-                      JPG or PNG • Max 5MB
+                      PDF, JPG or PNG • Max 5MB
                     </p>
                   </div>
                 </label>

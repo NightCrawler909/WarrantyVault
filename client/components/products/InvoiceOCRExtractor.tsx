@@ -46,17 +46,7 @@ export const InvoiceOCRExtractor: React.FC<InvoiceOCRExtractorProps> = ({
       toast.success('Invoice data detected successfully!');
     } catch (error: any) {
       const message = error.response?.data?.message || 'Failed to extract invoice data';
-      
-      // Show specific error message
-      if (message.includes('OCR only supports')) {
-        toast.error('PDF files are not supported for OCR extraction', { duration: 5000 });
-        toast('Please upload a JPG or PNG image of your invoice instead', { 
-          icon: '💡', 
-          duration: 5000 
-        });
-      } else {
-        toast.error(message, { duration: 4000 });
-      }
+      toast.error(message, { duration: 4000 });
     } finally {
       setIsExtracting(false);
     }
