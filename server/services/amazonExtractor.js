@@ -159,92 +159,111 @@ class AmazonExtractor {
   }
 
   /**
-   * Extract product name
+   * Extract product name using STRICT table parsing (User Request)
+   * Focus: Avoid headers, coupons, tax rows. Get FIRST valid product.
    * @param {string} text - Invoice text
    * @returns {string|null} Product name
    */
   extractProductName(text) {
-    console.log('[Amazon] Attempting product name extraction...');
+    console.log('[Amazon] Attempting STRICT product name extraction...');
+
+    // 1. Split text into lines to preserve table structure
+    const lines = text.split(/[\r\n]+/);
     
-    // Strategy 1: Extract from table - looking for "Description" column content
-    // Based on user logs: "Description" header is followed by content, but serial number "1" is unreliable or separate
-    // The description usually starts after "Description" and before HSN or quantity/price columns
-    
-    // Pattern: Find "Description" and capture until HSN code
-    let match = text.match(/Description\s+([A-Za-z0-9][^]*?)(?=\s*HSN:)/i);
-    
-    // If not found, try finding row starting with 1
-    if (!match) {
-       match = text.match(/\b1\s+([A-Za-z0-9][^]*?)(?=\s*HSN:)/i);
+    // 2. Locate Table Header (Description/Title/Sl No)
+    let headerIndex = -1;
+    for (let i = 0; i < lines.length; i++) {
+        const lowerLine = lines[i].toLowerCase();
+        if ((lowerLine.includes('description') && !lowerLine.includes('tax')) || 
+            lowerLine.includes('particulars') ||
+            (lowerLine.includes('title') && !lowerLine.includes('sub')) ||
+            (lowerLine.includes('sl') && lowerLine.includes('no'))) {
+            headerIndex = i;
+            console.log(`[Amazon] Table header found at line ${i}: "${lines[i].trim().substring(0, 50)}..."`);
+            break;
+        }
     }
+
+    // Default start if no header found (unlikely but safe)
+    const startScanIndex = headerIndex !== -1 ? headerIndex + 1 : 0;
     
-    if (match) {
-      let productName = match[1].trim();
-      
-      // Known garbage prefixes to remove (from table headers or previous text)
-      // Example: "of 1 For RETAILEZ PRIVATE LIMITED: Authorized Signatory Order Number..."
-      const garbagePrefixes = [
-        /^of\s+\d+\s+For\s+[^:]+:\s+Authorized\s+Signatory/i,
-        /^[^:]+:\s+Authorized\s+Signatory/i,
-        /^Order\s+Number:[^]+?Invoice\s+Number:[^]+?Invoice\s+Date:[^]+?Description/i
-      ];
-      
-      garbagePrefixes.forEach(prefix => {
-        productName = productName.replace(prefix, '').trim();
-      });
+    // 3. Scan Next 20 Lines for First Valid Product
+    // We stop as soon as we find a valid product row.
+    
+    for (let i = startScanIndex; i < Math.min(lines.length, startScanIndex + 25); i++) {
+        let line = lines[i].trim();
+        
+        // --- PRE-CLEANING ---
+        // Remove leading serial numbers (e.g., "1 ", "1. ")
+        line = line.replace(/^[0-9]+[\.\)]?\s+/, '');
+        
+        const lowerLine = line.toLowerCase();
+        const upperLine = line.toUpperCase(); // For strict casing checks if needed
 
-      // Split by known separators like newlines or pipe |
-      // If we captured way too much (like previous invoice details), take the last part which is likely the product
-      if (productName.length > 300 && productName.includes('Description')) {
-         const parts = productName.split('Description');
-         productName = parts[parts.length - 1].trim();
-      }
+        // --- HARD BLOCK RULES (Reject these lines immediately) ---
+        // Headers/Tax/Totals/Noise
+        const blockKeywords = [
+            'total', 'grand total', 'sub total', 'tax', 'cgst', 'sgst', 'igst', 
+            'vat', 'rate', 'discount', 'shipping', 'delivery', 'round off',
+            'amount', 'net amount', 'gross amount', 'taxable value', 
+            'unit price', 'quantity', 'qty', 'hsn', 'sac', 'sku',
+            'invoice number', 'order number', 'sold by', 'bill to', 'ship to',
+            'pickup', 'return', 'policy', 'page', 'of', 'website', 'customer',
+            'coupon', 'promotion', 'saving'
+        ];
+        
+        if (blockKeywords.some(kw => lowerLine.includes(kw))) {
+             // Exception: If the line is VERY long and has "Total" inside a phrase like "Total Protection", keep it.
+             // But usually safer to skip.
+             continue;
+        }
 
-      console.log(`[Amazon] Raw match (length ${productName.length}): ${productName.substring(0, 100)}...`);
-      
-      // Clean up
-      productName = productName.replace(/[\r\n]+/g, ' '); // Replace newlines with space
-      productName = productName.replace(/\s+/g, ' '); // Normalize whitespace
-      
-      // Remove ASIN patterns at the end
-      productName = productName.replace(/\s*\|\s*B0[A-Z0-9]{8,10}\s*\([^)]+\)\s*$/i, ''); 
-      productName = productName.replace(/\s*B0[A-Z0-9]{8,10}\s*\([^)]+\)\s*$/i, ''); 
-      productName = productName.replace(/\s*\(\s*B0[A-Z0-9]{8,10}\s*\)\s*$/i, ''); 
-      productName = productName.replace(/\s*\|\s*B0[A-Z0-9]{8,10}\s*$/i, ''); 
-      
-      // Remove "1" prefix if it was captured
-      productName = productName.replace(/^1\s+/, '');
+        // --- VALIDATION RULES ---
 
-      productName = productName.trim();
-      
-      // Validate length
-      if (productName.length >= 5 && productName.length <= 500) {
-        const preview = productName.length > 80 ? productName.substring(0, 80) + '...' : productName;
-        console.log(`[Amazon] Product Name: ${preview}`);
+        // 1. Length Check (> 15 chars, ideally > 25 but some short products exist)
+        if (line.length < 10) continue; 
+        
+        // 2. Alphabetic Check (Must have letters)
+        if (!/[a-zA-Z]/.test(line)) continue;
+
+        // 3. Word Count (At least 3 words)
+        const wordCount = line.split(/\s+/).length;
+        if (wordCount < 3) continue;
+
+        // 4. Numeric Density (Reject if > 40% digits)
+        const digitCount = (line.match(/\d/g) || []).length;
+        if (digitCount / line.length > 0.4) continue;
+
+        // 5. Currency Symbol Only Check (Reject "₹ 300.00")
+        if (/^[₹Rs\.\s0-9]+$/.test(line)) continue;
+
+        // --- If we passed all checks, this is likely our product ---
+        
+        // --- POST-CLEANING ---
+        // Clean up common artifacts
+        let productName = line;
+        
+        // Remove HSN/SAC codes if attached at end
+        productName = productName.replace(/\s+(HSN|SAC|sku|asin)[:\s\-].*$/i, '');
+        
+        // Remove prices at the end of the string
+        productName = productName.replace(/\s+₹?\s*[\d,]+\.?\d*$/i, '');
+        
+        // Remove Amazon specific artifacts like (B0...)
+        productName = productName.replace(/\s*\(?B0[A-Z0-9]{8,10}\)?\s*$/i, '');
+        productName = productName.replace(/\s*\|\s*B0[A-Z0-9]{8,10}.*$/i, '');
+        
+        // Final trim
+        productName = productName.trim();
+        
+        // Double check final length
+        if (productName.length < 5) continue;
+
+        console.log(`[Amazon] Valid Product Found at line ${i}: "${productName}"`);
         return productName;
-      }
-    }
-    
-    // Strategy 2: Look for Description column
-    match = text.match(/Description[:\s]+([A-Za-z][^]*?)(?=\s*(?:Unit\s*Price|HSN:|₹\s*[0-9]{2,3}\.))/i);
-    if (match) {
-      let productName = match[1].trim();
-      console.log(`[Amazon] Description match: ${productName.substring(0, 100)}...`);
-      
-      productName = productName.replace(/\s+/g, ' ');
-      productName = productName.replace(/\s*\|\s*B0[A-Z0-9]{8,10}.*$/i, '');
-      productName = productName.replace(/\s*B0[A-Z0-9]{8,10}\s*\([^)]+\)\s*$/i, '');
-      
-      if (productName.length >= 10 && productName.length <= 500) {
-        const preview = productName.length > 80 ? productName.substring(0, 80) + '...' : productName;
-        console.log(`[Amazon] Product Name (from Description): ${preview}`);
-        return productName;
-      }
-    } else {
-      console.log('[Amazon] No match for pattern 2 (Description column)');
     }
 
-    console.log('[Amazon] ⚠️  Product Name not found');
+    console.log('[Amazon] No valid product name found in first 20 lines after header.');
     return null;
   }
 
