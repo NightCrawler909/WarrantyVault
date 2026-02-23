@@ -23,8 +23,8 @@ export default function SolutionSection() {
           viewport={{ once: true }}
           transition={{ duration: 0.8 }}
         >
-          <h2 className="text-5xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-purple-200 mb-8">
-            Smart Warranty Management, Automated.
+          <h2 className="text-5xl font-bold text-white mb-8">
+            Smart Warranty Management, <span className="text-purple-500">Automated.</span>
           </h2>
           <p className="text-xl text-gray-400 mb-8 leading-relaxed">
             Forget manual entry. Our advanced AI scans your invoices, identifies products, dates, and prices, and organizes everything for you in seconds.

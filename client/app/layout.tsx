@@ -5,11 +5,22 @@ import { AuthProvider } from '@/context/AuthContext';
 import { ThemeProvider } from '@/context/ThemeContext';
 import { Toaster } from 'react-hot-toast';
 
+import '@/components/common/SmoothScroll';
+import SmoothScroll from '@/components/common/SmoothScroll';
+
 const figtree = Figtree({ 
   subsets: ['latin-ext'],
   weight: ['400', '800'],
   display: 'swap',
 });
+
+// Import locomotive-scroll styles (can be done in globals.css, but user asked for @import style)
+// Since this is Next.js App Router, we should import css in a global CSS file or here globally.
+// However, Locomotive Scroll 5 doesn't strictly require CSS for basic functionality if built on Lenis, 
+// but for data-scroll attributes it might be needed.
+// Attempting to import css directly might fail if node_modules path isn't resolved by postcss/css modules properly without configuration, 
+// but importing in layout is standard for global styles.
+import 'locomotive-scroll/dist/locomotive-scroll.css';
 
 export const metadata: Metadata = {
   title: 'WarrantyVault - Manage Your Product Warranties',
@@ -24,10 +35,13 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${figtree.className} bg-[#f5f7fa] text-neutral-900 antialiased`}>
-        <ThemeProvider>
-          <AuthProvider>
-            {children}
-            <Toaster 
+        <SmoothScroll>
+          <ThemeProvider>
+            <AuthProvider>
+              {children}
+            </AuthProvider>
+          </ThemeProvider>
+          <Toaster 
               position="top-right"
               toastOptions={{
                 duration: 3000,
@@ -54,8 +68,7 @@ export default function RootLayout({
                 },
               }}
             />
-          </AuthProvider>
-        </ThemeProvider>
+        </SmoothScroll>
       </body>
     </html>
   );

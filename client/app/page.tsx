@@ -27,15 +27,28 @@ export default function Home() {
         </div>
         
         {/* Floating Navbar */}
-        <nav className="fixed top-8 left-1/2 -translate-x-1/2 z-50 w-full max-w-4xl px-4">
+        <nav className="fixed top-8 left-1/2 -translate-x-1/2 z-50 w-full max-w-5xl px-4">
           <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-full px-6 py-4 flex items-center justify-between shadow-2xl transition-all hover:bg-white/10">
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-purple-400" />
-              <span className="text-lg font-bold tracking-tight">WarrantyVault</span>
-            </div>
-            <div className="flex items-center gap-6 text-sm font-medium text-gray-300">
-              <Link href="/" className="hover:text-white transition-colors">Home</Link>
+            <Link href="/" className="flex items-center gap-2 group">
+              <Sparkles className="w-5 h-5 text-white group-hover:text-purple-400 transition-colors" />
+              <span className="text-lg font-bold tracking-tight text-white group-hover:text-purple-400 transition-colors">WarrantyVault</span>
+            </Link>
+            
+            <div className="hidden md:flex items-center gap-8 text-sm font-medium text-gray-300">
+              <Link href="#features" className="hover:text-white transition-colors">Features</Link>
+              <Link href="#how-it-works" className="hover:text-white transition-colors">How it Works</Link>
               <Link href="/dashboard" className="hover:text-white transition-colors">Dashboard</Link>
+            </div>
+
+            <div className="flex items-center gap-4">
+              <Link href="/login" className="text-sm font-medium text-white hover:text-purple-400 transition-colors hidden sm:block">
+                Log In
+              </Link>
+              <Link href="/register">
+                <Button size="sm" className="rounded-full bg-white text-black hover:bg-gray-200 font-bold px-6">
+                  Sign Up
+                </Button>
+              </Link>
             </div>
           </div>
         </nav>
@@ -45,22 +58,38 @@ export default function Home() {
           <div className="flex flex-col items-center max-w-4xl text-center pointer-events-auto">
             
             {/* Badge */}
-            <div className="mb-8 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-1.5 text-sm text-gray-300 backdrop-blur-md transition-colors hover:bg-white/10">
+            <div 
+              data-scroll 
+              data-scroll-speed="0.1"
+              className="mb-8 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-1.5 text-sm text-gray-300 backdrop-blur-md transition-colors hover:bg-white/10"
+            >
               <span className="flex h-2 w-2 rounded-full bg-purple-400 animate-pulse" />
               Never Lose Track
             </div>
 
             {/* Headline */}
-            <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight mb-8 text-white drop-shadow-sm">
+            <h1 
+              data-scroll 
+              data-scroll-speed="0.2"
+              className="text-5xl md:text-7xl font-extrabold tracking-tight mb-8 text-white drop-shadow-sm"
+            >
               Welcome to WarrantyVault
             </h1>
             
-            <p className="text-xl text-gray-400 mb-12 max-w-2xl leading-relaxed">
+            <p 
+              data-scroll 
+              data-scroll-speed="0.1"
+              className="text-xl text-gray-400 mb-12 max-w-2xl leading-relaxed"
+            >
                Never lose track of your warranties again. Managed simply, effectively, and beautifully.
             </p>
 
             {/* Buttons */}
-            <div className="flex flex-col sm:flex-row gap-6 items-center">
+            <div 
+              data-scroll 
+              data-scroll-speed="0.1"
+              className="flex flex-col sm:flex-row gap-6 items-center"
+            >
               <Link href="/login">
                 <Button className="h-12 px-8 rounded-full bg-white text-black hover:bg-gray-200 transition-all font-medium text-lg min-w-[160px] shadow-[0_0_20px_-5px_rgba(255,255,255,0.3)]">
                   Get Started
@@ -76,10 +105,26 @@ export default function Home() {
         </div>
       </div>
 
-      <ProblemSection />
-      <SolutionSection />
-      <FeaturesSection />
-      <HowItWorksSection />
+      <section id="problem">
+        <ProblemSection />
+      </section>
+      <section id="solution">
+        <SolutionSection />
+      </section>
+      <section id="features">
+        <FeaturesSection />
+      </section>
+      <section id="how-it-works">
+        <HowItWorksSection />
+      </section>
+      <div className="md:hidden flex justify-center py-4 bg-black">
+        {/* Mobile Navigation Links */}
+        <div className="flex gap-4 text-sm text-gray-400">
+          <Link href="#features">Features</Link>
+          <Link href="#how-it-works">How it Works</Link>
+          <Link href="/dashboard">Dashboard</Link>
+        </div>
+      </div>
       <TrustSection />
       <CTASection />
       

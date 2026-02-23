@@ -32,8 +32,8 @@ export default function ProblemSection() {
           transition={{ duration: 0.6 }}
           className="text-center mb-16"
         >
-          <h2 className="text-4xl md:text-5xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-white mb-6">
-            Stop Losing Important Warranty Information
+          <h2 className="text-4xl md:text-5xl font-bold text-white mb-6">
+            Stop Losing <span className="text-purple-500">Important Warranty Information</span>
           </h2>
           <p className="text-xl text-gray-400 max-w-2xl mx-auto">
             Most people lose invoices, forget warranty periods, and struggle during product claims.
