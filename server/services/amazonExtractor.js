@@ -159,18 +159,81 @@ class AmazonExtractor {
   }
 
   /**
-   * Extract product name using STRICT table parsing (User Request)
-   * Focus: Avoid headers, coupons, tax rows. Get FIRST valid product.
+   * Extract product name using STRICT TABLE-BASED Strategy (Multi-Table Support)
+   * Focus: Identifying correct product table among multiple tables (e.g. COD fees vs Product)
    * @param {string} text - Invoice text
    * @returns {string|null} Product name
    */
   extractProductName(text) {
-    console.log('[Amazon] Attempting STRICT product name extraction...');
+    console.log('[Amazon] Attempting STRICT TABLE-BASED product extraction...');
 
-    // 1. Split text into lines to preserve table structure
-    const lines = text.split(/[\r\n]+/);
+    // STEP 1: Split text into potential table blocks
+    // We look for table headers "Sl. No" or "Description" as split points
+    // We prepend a dummy delimiter to finding the first one
+    const splitPattern = /(?=(?:Sl\.?\s*No|Description|Particulars|Item\s*Name))/i;
+    const rawTables = text.split(splitPattern);
     
-    // 2. Locate Table Header (Description/Title/Sl No)
+    // Filter out very short blocks
+    const tables = rawTables.filter(t => t.length > 50 && (t.toLowerCase().includes('description') || t.toLowerCase().includes('sl')));
+    
+    if (tables.length === 0) {
+        // Fallback: Treat whole text as one table
+        tables.push(text);
+    }
+    
+    console.log(`[Amazon] Found ${tables.length} potential table blocks.`);
+
+    // STEP 2: Score Each Table
+    let bestTable = null;
+    let maxScore = -999;
+
+    tables.forEach((tableText, index) => {
+        let score = 0;
+        const lowerTable = tableText.toLowerCase();
+
+        // Positive Indicators
+        if (/HSN[:\s]*\d{4,8}/i.test(tableText)) score += 5;
+        if (/B0[A-Z0-9]{8}/.test(tableText)) score += 4;
+        // Check for long DESCRIPTION inside table (look for lines with > 40 chars)
+        if (/\b[A-Za-z0-9\s]{50,}\b/.test(tableText)) score += 4;
+        
+        // Check for "Qty" column with value "1"
+        // This is tricky in raw text, looking for "1" near a price pattern
+        if (/\b1\s+[0-9,]+\./.test(tableText)) score += 2;
+        
+        // Check for Price > 100
+        const prices = tableText.match(/[0-9,]+\.[0-9]{2}/g);
+        if (prices) {
+             const maxPrice = Math.max(...prices.map(p => parseFloat(p.replace(/,/g, '')) || 0));
+             if (maxPrice > 100) score += 2;
+             if (maxPrice < 50) score -= 3; // Penalty for very low totals (likely Fees)
+        }
+
+        // Negative Indicators (Service/Fee Tables)
+        if (lowerTable.includes('cash on delivery') || lowerTable.includes('pay on delivery')) score -= 5;
+        if (lowerTable.includes('shipping charges') || lowerTable.includes('delivery charges')) score -= 5;
+        if (lowerTable.includes('service accounting code') || lowerTable.includes('sac')) score -= 5;
+        if (lowerTable.includes('convenience fee') || lowerTable.includes('cod fee')) score -= 5;
+        
+        console.log(`[Amazon] Table ${index} Score: ${score}`);
+        
+        if (score > maxScore) {
+            maxScore = score;
+            bestTable = tableText;
+        }
+    });
+
+    if (!bestTable) {
+        console.log('[Amazon] No valid table found.');
+        return null;
+    }
+
+    console.log(`[Amazon] Selected Table with Score ${maxScore}. Scanning rows...`);
+
+    // STEP 3: Extract First Valid Row from Selected Table
+    const lines = bestTable.split(/[\r\n]+/);
+    
+    // Find header index within this block
     let headerIndex = -1;
     for (let i = 0; i < lines.length; i++) {
         const lowerLine = lines[i].toLowerCase();
@@ -179,29 +242,23 @@ class AmazonExtractor {
             (lowerLine.includes('title') && !lowerLine.includes('sub')) ||
             (lowerLine.includes('sl') && lowerLine.includes('no'))) {
             headerIndex = i;
-            console.log(`[Amazon] Table header found at line ${i}: "${lines[i].trim().substring(0, 50)}..."`);
             break;
         }
     }
-
-    // Default start if no header found (unlikely but safe)
+    
     const startScanIndex = headerIndex !== -1 ? headerIndex + 1 : 0;
     
-    // 3. Scan Next 20 Lines for First Valid Product
-    // We stop as soon as we find a valid product row.
-    
-    for (let i = startScanIndex; i < Math.min(lines.length, startScanIndex + 25); i++) {
+    // Scan up to 20 lines
+    for (let i = startScanIndex; i < Math.min(lines.length, startScanIndex + 20); i++) {
         let line = lines[i].trim();
         
-        // --- PRE-CLEANING ---
-        // Remove leading serial numbers (e.g., "1 ", "1. ")
-        line = line.replace(/^[0-9]+[\.\)]?\s+/, '');
+        // --- CLEANING SERIAL NUMBERS ---
+        // Matches "1 ", "1.", "(1)"
+        line = line.replace(/^[\(\[]?\d+[\)\]\.]?\s+/, '');
         
         const lowerLine = line.toLowerCase();
-        const upperLine = line.toUpperCase(); // For strict casing checks if needed
-
-        // --- HARD BLOCK RULES (Reject these lines immediately) ---
-        // Headers/Tax/Totals/Noise
+        
+        // --- HARD BLOCK RULES ---
         const blockKeywords = [
             'total', 'grand total', 'sub total', 'tax', 'cgst', 'sgst', 'igst', 
             'vat', 'rate', 'discount', 'shipping', 'delivery', 'round off',
@@ -209,61 +266,60 @@ class AmazonExtractor {
             'unit price', 'quantity', 'qty', 'hsn', 'sac', 'sku',
             'invoice number', 'order number', 'sold by', 'bill to', 'ship to',
             'pickup', 'return', 'policy', 'page', 'of', 'website', 'customer',
-            'coupon', 'promotion', 'saving'
+            'coupon', 'promotion', 'saving', 'cod fee', 'service charge',
+            'cash on delivery', 'pay on delivery'
         ];
         
         if (blockKeywords.some(kw => lowerLine.includes(kw))) {
-             // Exception: If the line is VERY long and has "Total" inside a phrase like "Total Protection", keep it.
-             // But usually safer to skip.
              continue;
         }
-
+        
         // --- VALIDATION RULES ---
-
-        // 1. Length Check (> 15 chars, ideally > 25 but some short products exist)
+        // 1. Length Check
         if (line.length < 10) continue; 
         
-        // 2. Alphabetic Check (Must have letters)
+        // 2. Alphabetic Check
         if (!/[a-zA-Z]/.test(line)) continue;
 
-        // 3. Word Count (At least 3 words)
+        // 3. Word Count
         const wordCount = line.split(/\s+/).length;
-        if (wordCount < 3) continue;
-
-        // 4. Numeric Density (Reject if > 40% digits)
+        if (wordCount < 2) continue; // Allow 2 words like "Sony Headphones"
+        
+        // 4. Numeric Density
         const digitCount = (line.match(/\d/g) || []).length;
         if (digitCount / line.length > 0.4) continue;
-
-        // 5. Currency Symbol Only Check (Reject "₹ 300.00")
+        
+        // 5. Currency Check
         if (/^[₹Rs\.\s0-9]+$/.test(line)) continue;
 
-        // --- If we passed all checks, this is likely our product ---
-        
-        // --- POST-CLEANING ---
-        // Clean up common artifacts
+        // --- SUCCESS ---
+        // Post-Cleaning
         let productName = line;
-        
-        // Remove HSN/SAC codes if attached at end
         productName = productName.replace(/\s+(HSN|SAC|sku|asin)[:\s\-].*$/i, '');
-        
-        // Remove prices at the end of the string
         productName = productName.replace(/\s+₹?\s*[\d,]+\.?\d*$/i, '');
-        
-        // Remove Amazon specific artifacts like (B0...)
         productName = productName.replace(/\s*\(?B0[A-Z0-9]{8,10}\)?\s*$/i, '');
         productName = productName.replace(/\s*\|\s*B0[A-Z0-9]{8,10}.*$/i, '');
         
-        // Final trim
         productName = productName.trim();
         
-        // Double check final length
         if (productName.length < 5) continue;
 
-        console.log(`[Amazon] Valid Product Found at line ${i}: "${productName}"`);
+        console.log(`[Amazon] Valid Product Found: "${productName}"`);
         return productName;
     }
 
-    console.log('[Amazon] No valid product name found in first 20 lines after header.');
+    console.log('[Amazon] No valid product name found in selected table. Using Fallback...');
+    // Fallback logic could go here if needed, but table match usually succeeds
+    // Try the "1 <Product> Price" pattern on the FULL text as a last resort
+    const fallbackMatch = text.match(/\b1\s+([A-Za-z0-9][^]*?)(?=\s*(?:₹|HSN:))/i);
+    if (fallbackMatch) {
+       let name = fallbackMatch[1].trim();
+       if (name.length > 10 && name.length < 300) {
+         name = name.replace(/[\r\n]+/g, ' ');
+         return name.replace(/\s+/g, ' ');
+       }
+    }
+
     return null;
   }
 

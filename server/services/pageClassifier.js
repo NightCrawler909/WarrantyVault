@@ -37,68 +37,89 @@ class PageClassifier {
     const lowerText = text.toLowerCase();
     const indicators = [];
 
-    // NEGATIVE INDICATORS (Service/COD page)
-    if (lowerText.includes('service accounting code')) {
-      score -= 50;
-      indicators.push('Service Code');
+    // --- POSITIVE INDICATORS (Product Page) ---
+
+    // 1. Check for HSN or Product Code
+    const hasHSN = /HSN[:\s]*\d{4,8}/i.test(text);
+    const hasASIN = /B0[A-Z0-9]{8}/.test(text);
+    
+    if (hasHSN) {
+        score += 30;
+        indicators.push('HSN Found');
     }
-    if (lowerText.includes('cash on delivery') || lowerText.includes('pay on delivery')) {
-      score -= 50;
-      indicators.push('COD');
-    }
-    if (/\bcod\b/i.test(text)) {
-      score -= 50;
-      indicators.push('COD keyword');
-    }
-    if (/amount in words:\s*(seven|eight|nine|ten)\s*only/i.test(text)) {
-      score -= 50;
-      indicators.push('Small amount');
-    }
-    if (lowerText.includes('delivery charges') || lowerText.includes('cod fee')) {
-      score -= 30;
-      indicators.push('Service fee');
+    if (hasASIN) {
+        score += 40;
+        indicators.push('ASIN Found');
     }
 
-    // POSITIVE INDICATORS (Product page)
-    if (/hsn[:\s]*\d{8}/i.test(text)) {
-      score += 20;
-      indicators.push('HSN-8');
+    // 2. Check for "Qty = 1" and "Price > 100" in same/nearby lines
+    // This is a strong indicator of a product row
+    const lines = text.split(/[\r\n]+/);
+    let hasProductRow = false;
+    
+    for (const line of lines) {
+        // Look for lines containing "1" (Qty) and a large price
+        // Matches "1 " or " 1 " and a price like "488.00" or "1,299"
+        if (/\b1\s+/.test(line) || /\s+1\s+/.test(line)) {
+            // Check for price > 100
+            const prices = line.match(/[0-9,]+\.[0-9]{2}/g);
+            if (prices) {
+                const maxPrice = Math.max(...prices.map(p => parseFloat(p.replace(/,/g, ''))));
+                if (maxPrice > 100) {
+                    hasProductRow = true;
+                    // Additional check to ensure it's not a total line
+                    if (!line.toLowerCase().includes('total') && !line.toLowerCase().includes('tax')) {
+                         score += 50; 
+                         indicators.push('Product Row (Qty=1, Price>100)');
+                         break;
+                    }
+                }
+            }
+        }
     }
-    if (lowerText.includes('unit price')) {
-      score += 20;
-      indicators.push('Unit Price');
+
+    // 3. Long Description Check
+    if (/\b[A-Za-z]{3,}\s+[A-Za-z]{3,}\s+[A-Za-z]{3,}\s+[A-Za-z]{3,}/.test(text)) {
+        // At least 4 words in sequence
+        score += 10;
+        indicators.push('Description Text');
     }
-    if (lowerText.includes('qty')) {
-      score += 20;
-      indicators.push('Qty');
+
+    // --- NEGATIVE INDICATORS (Service/COD page) ---
+    
+    // If page contains ONLY service charges
+    const serviceKeywords = [
+        'service accounting code', 
+        'cash on delivery', 
+        'pay on delivery', 
+        'cod fee', 
+        'shipping charges',
+        'convenience fee'
+    ];
+    
+    let serviceScore = 0;
+    for (const kw of serviceKeywords) {
+        if (lowerText.includes(kw)) {
+            serviceScore += 20;
+            indicators.push(`Service Keyword (${kw})`);
+        }
     }
-    if (/\b1\s+[A-Za-z0-9\s]{40,}/i.test(text)) {
-      score += 30;
-      indicators.push('Long description');
-    }
-    if (/B0[A-Z0-9]{8}/.test(text)) {
-      score += 30;
-      indicators.push('ASIN');
+
+    // If strong service indicators present but weak product indicators
+    if (serviceScore > 0 && !hasProductRow && !hasASIN) {
+        score -= 100; // Heavily penalize
+        indicators.push('LIKELY SERVICE PAGE');
     }
 
     // Extract maximum total amount
     const maxTotal = this.extractMaxTotal(text);
 
-    // Apply total-based modifiers
-    if (maxTotal > 100) {
-      score += 40;
-      indicators.push(`Total>100 (₹${maxTotal})`);
-    } else if (maxTotal > 0 && maxTotal < 50) {
-      score -= 30;
-      indicators.push(`Total<50 (₹${maxTotal})`);
-    }
-
-    // Determine page type
+    // Determines page type
     let pageType = 'unknown';
-    if (score < 0) {
-      pageType = 'service';
-    } else if (score > 50) {
+    if (score > 40) {
       pageType = 'product';
+    } else if (score < 0) {
+      pageType = 'service';
     }
 
     return {

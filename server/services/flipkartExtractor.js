@@ -159,18 +159,82 @@ class FlipkartExtractor {
   }
 
   /**
-   * Extract product title using STRICT table parsing (User Request)
-   * Focus: Avoid garbage headers, unit prices, tax rows. Get FIRST valid product.
+   * Extract product title using STRICT TABLE-BASED Strategy (Multi-Table Support)
+   * Focus: Identifying correct product table among multiple tables (e.g. Tax/Fee vs Product)
    * @param {string} text - Invoice text
    * @returns {string|null} Product title
    */
   extractProductTitle(text) {
-    console.log('[Flipkart] Attempting STRICT product title extraction...');
+    console.log('[Flipkart] Attempting STRICT TABLE-BASED product extraction...');
     
-    // 1. Split text into lines to preserve table structure
-    const lines = text.split(/[\r\n]+/);
+    // STEP 1: Split text into potential table blocks
+    // Flipkart tables usually start with headers like: "Product Name", "Title", "Description", "Sl No"
+    const splitPattern = /(?=(?:Sl\.?\s*No|Description|Title|Product\s*Name))/i;
+    const rawTables = text.split(splitPattern);
+    
+    // Filter out very short blocks or blocks without relevant content
+    const tables = rawTables.filter(t => t.length > 50 && (
+        t.toLowerCase().includes('description') || 
+        t.toLowerCase().includes('title') || 
+        t.toLowerCase().includes('product')
+    ));
+    
+    if (tables.length === 0) {
+        tables.push(text); // Fallback: use entire text
+    }
 
-    // 2. Locate Table Header (Description/Title/Sl No)
+    console.log(`[Flipkart] Found ${tables.length} potential table blocks.`);
+
+    // STEP 2: Score Each Table
+    let bestTable = null;
+    let maxScore = -999;
+
+    tables.forEach((tableText, index) => {
+        let score = 0;
+        const lowerTable = tableText.toLowerCase();
+
+        // Positive Indicators
+        if (/HSN[:\s]*\d{4,8}/i.test(tableText)) score += 5;
+        if (/Taxable\s*Value/i.test(tableText)) score += 2; // Flipkart product tables often have this
+        
+        // Find "Qty" column with value "1"
+        if (/\b1\s+[0-9,]+\./.test(tableText)) score += 2;
+
+        // Long Description Check (> 40 chars)
+        if (/\b[A-Za-z0-9\s\-\(\)]{40,}\b/.test(tableText)) score += 4;
+
+        // Price Logic
+        const prices = tableText.match(/[0-9,]+\.[0-9]{2}/g);
+        if (prices) {
+             const maxPrice = Math.max(...prices.map(p => parseFloat(p.replace(/,/g, '')) || 0));
+             if (maxPrice > 100) score += 2;
+             if (maxPrice < 50) score -= 3;
+        }
+
+        // Negative Indicators (Service/Fee Tables)
+        if (lowerTable.includes('shipping charges') || lowerTable.includes('delivery charges')) score -= 5;
+        if (lowerTable.includes('convenience fee')) score -= 5;
+        if (lowerTable.includes('tax details') && !lowerTable.includes('product')) score -= 3; // Tax only table
+
+        console.log(`[Flipkart] Table ${index} Score: ${score}`);
+        
+        if (score > maxScore) {
+            maxScore = score;
+            bestTable = tableText;
+        }
+    });
+
+    if (!bestTable) {
+        console.log('[Flipkart] No valid table found.');
+        return null;
+    }
+
+    console.log(`[Flipkart] Selected Table with Score ${maxScore}. Scanning rows...`);
+
+    // STEP 3: Extract First Valid Row from Selected Table
+    const lines = bestTable.split(/[\r\n]+/);
+    
+    // Find header index within this block
     let headerIndex = -1;
     for (let i = 0; i < lines.length; i++) {
         const lowerLine = lines[i].toLowerCase();
@@ -179,27 +243,21 @@ class FlipkartExtractor {
             (lowerLine.includes('sl') && lowerLine.includes('no')) ||
             lowerLine.includes('product') && lowerLine.includes('name')) {
             headerIndex = i;
-            console.log(`[Flipkart] Table header found at line ${i}: "${lines[i].trim().substring(0, 50)}..."`);
             break;
         }
     }
-
-    // If no header found, start from top (fallback)
+    
     const startScanIndex = headerIndex !== -1 ? headerIndex + 1 : 0;
-
-    // 3. Scan Next 20 Lines for First Valid Product
-    // We stop as soon as we find a valid product row.
+    
     for (let i = startScanIndex; i < Math.min(lines.length, startScanIndex + 25); i++) {
         let line = lines[i].trim();
 
         // --- PRE-CLEANING ---
         // Clean up common Flipkart serial numbers "1 " or "1"
         line = line.replace(/^\d+\s+/, '');
-
         const lowerLine = line.toLowerCase();
 
         // --- HARD BLOCK RULES (Reject these lines immediately) ---
-        // Headers/Tax/Totals/Noise
         const blockKeywords = [
             'total', 'grand total', 'taxable value', 'cgst', 'sgst', 'igst', 
             'vat', 'rate', 'discount', 'shipping', 'delivery', 
@@ -207,7 +265,8 @@ class FlipkartExtractor {
             'unit price', 'quantity', 'qty', 'hsn', 'sac', 'sku',
             'authorized signatory', 'ordered', 'delivered', 'through', 
             'invoice number', 'order id', 'sold by', 'return', 'policy',
-            'coupon', 'promotion', 'saving', 'cash', 'pay'
+            'coupon', 'promotion', 'saving', 'cash', 'pay',
+            'cod fee', 'service charge', 'service accounting code', 'convenience fee'
         ];
         
         if (blockKeywords.some(kw => lowerLine.includes(kw))) {
@@ -233,9 +292,7 @@ class FlipkartExtractor {
         // 5. Currency Symbol Only Check (Reject "₹ 300.00")
         if (/^[₹Rs\.\s0-9]+$/.test(line)) continue;
 
-        // --- If we passed all checks, this is likely our product ---
-        
-        // --- POST-CLEANING ---
+        // --- SUCCESS ---
         let productName = line;
         
         // Remove HSN/SAC codes if attached at end
@@ -251,17 +308,15 @@ class FlipkartExtractor {
         // Final trim
         productName = productName.trim();
 
-        console.log(`[Flipkart] Valid Product Found at line ${i}: "${productName}"`);
+        console.log(`[Flipkart] Valid Product Found: "${productName}"`);
         return productName;
     }
     
-    console.log('[Flipkart] No valid product title found in first 20 lines after header.');
+    console.log('[Flipkart] No valid product title found in selected table. Using Fallback...');
     
-    // Fallback: Try regex for "1 <Product> Price" pattern
-    // This handles cases where the product is on the same line as "1" and was maybe skipped/cleaned weirdly
+    // Fallback: Try regex for "1 <Product> Price" pattern (Original logic)
     const fallbackMatch = text.match(/\b1\s+([A-Za-z0-9][^]*?)(?=\s*(?:HSN|SAC|₹))/i);
     if (fallbackMatch) {
-       console.log('[Flipkart] Using fallback pattern...');
        let name = fallbackMatch[1].trim();
        if (name.length > 10 && name.length < 200) {
          name = name.replace(/[\r\n]+/g, ' ');
