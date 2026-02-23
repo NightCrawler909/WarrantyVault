@@ -4,6 +4,7 @@ const fs = require('fs');
 const pdfService = require('./pdfService');
 const imagePreprocessService = require('./imagePreprocessService');
 const pythonAIService = require('./pythonAIService');
+const invoiceProcessor = require('./invoiceProcessor');
 
 class OCRService {
   constructor() {
@@ -1699,21 +1700,31 @@ class OCRService {
    */
   async processInvoice(filePath) {
     try {
-      // STEP 1: Extract text using hybrid OCR (PaddleOCR → Tesseract fallback)
+      console.log('\n🚀 Using NEW Modular Invoice Processing Engine');
+      
+      // STEP 1: Extract text using hybrid OCR (handles both embedded PDFs and image-based PDFs)
+      console.log('STEP 1: Extracting text with OCR...');
       const ocrResult = await this.extractInvoiceData(filePath);
       
-      // STEP 2: Parse text with deterministic parsers
-      const parsedData = this.parseInvoiceText(ocrResult.text, {
-        method: ocrResult.method,
-        confidence: ocrResult.confidence
-      });
+      if (!ocrResult || !ocrResult.text) {
+        throw new Error('Failed to extract text from invoice');
+      }
       
-      // STEP 3: AI Fallback - if deterministic parsing fails validation
-      const needsAIFallback = this.needsAIFallback(parsedData);
+      console.log(`✅ Text extracted using ${ocrResult.method} (confidence: ${ocrResult.confidence}%)\n`);
+      
+      // STEP 2: Use new modular architecture to process the extracted text
+      const result = await invoiceProcessor.process({ text: ocrResult.text });
+      
+      // Convert to legacy format for backward compatibility
+      const legacyData = this.convertToLegacyFormat(result);
+      
+      // STEP 3: AI Fallback - if modular extraction has low confidence
+      const needsAIFallback = result.confidenceScore < 60 || this.needsAIFallback(legacyData);
       
       if (needsAIFallback) {
-        console.log('\n🤖 TRIGGERING AI FALLBACK - Deterministic parsing insufficient');
-        console.log(`   Reason: ${this.getValidationIssues(parsedData).join(', ')}`);
+        console.log('\n🤖 TRIGGERING AI FALLBACK - Confidence below threshold');
+        console.log(`   Confidence: ${result.confidenceScore}%`);
+        console.log(`   Reason: ${this.getValidationIssues(legacyData).join(', ')}`);
         
         try {
           // Check if Python AI service is available
@@ -1723,9 +1734,10 @@ class OCRService {
             console.log('   Calling Python AI service for structured extraction...\n');
             const aiData = await pythonAIService.extractStructuredData(filePath);
             
-            // Merge AI results with deterministic results (AI takes precedence for missing/invalid fields)
-            const mergedData = this.mergeAIResults(parsedData, aiData);
+            // Merge AI results with modular results (AI takes precedence for missing/invalid fields)
+            const mergedData = this.mergeAIResults(legacyData, aiData);
             mergedData.extractionMethod = 'ai_fallback';
+            mergedData.confidenceScore = Math.max(result.confidenceScore, 70); // Boost confidence after AI
             
             console.log('✅ AI Fallback completed - using enhanced data\n');
             
@@ -1733,20 +1745,22 @@ class OCRService {
               success: true,
               rawText: ocrResult.text,
               extractedData: mergedData,
+              modularResult: result, // Include modular result for debugging
             };
           } else {
-            console.log('⚠️  Python AI service unavailable - using deterministic results\n');
+            console.log('⚠️  Python AI service unavailable - using modular results\n');
           }
         } catch (aiError) {
           console.error('❌ AI fallback failed:', aiError.message);
-          console.log('   Continuing with deterministic results\n');
+          console.log('   Continuing with modular results\n');
         }
       }
       
       return {
         success: true,
         rawText: ocrResult.text,
-        extractedData: parsedData,
+        extractedData: legacyData,
+        modularResult: result, // Include modular result for reference
       };
     } catch (error) {
       console.error('Invoice processing error:', error);
@@ -1756,6 +1770,29 @@ class OCRService {
         extractedData: null,
       };
     }
+  }
+
+  /**
+   * Convert modular result to legacy format for backward compatibility
+   * @param {Object} modularResult - Result from invoiceProcessor
+   * @returns {Object} Legacy format
+   */
+  convertToLegacyFormat(modularResult) {
+    return {
+      detectedProductName: modularResult.productName || null,
+      detectedOrderId: modularResult.orderId || null,
+      detectedInvoiceNumber: modularResult.invoiceNumber || null,
+      detectedAmount: modularResult.price ? modularResult.price.toString() : null,
+      detectedPurchaseDate: modularResult.invoiceDate || modularResult.orderDate || null,
+      detectedOrderDate: modularResult.orderDate || null,
+      detectedRetailer: modularResult.retailer || modularResult.vendor || null,
+      detectedVendor: modularResult.vendor || modularResult.retailer || null,
+      detectedHSN: modularResult.hsn || null,
+      detectedPlatform: modularResult.platform || 'unknown',
+      confidenceScore: modularResult.confidenceScore || 0,
+      extractionMethod: 'modular_engine',
+      extractionDetails: modularResult.extractionDetails || {}
+    };
   }
 
   /**
