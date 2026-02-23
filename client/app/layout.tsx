@@ -1,11 +1,15 @@
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
+import { Figtree } from 'next/font/google';
 import './globals.css';
 import { AuthProvider } from '@/context/AuthContext';
 import { ThemeProvider } from '@/context/ThemeContext';
 import { Toaster } from 'react-hot-toast';
 
-const inter = Inter({ subsets: ['latin'] });
+const figtree = Figtree({ 
+  subsets: ['latin-ext'],
+  weight: ['400', '800'],
+  display: 'swap',
+});
 
 export const metadata: Metadata = {
   title: 'WarrantyVault - Manage Your Product Warranties',
@@ -19,7 +23,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="bg-[#f5f7fa] text-neutral-900 antialiased font-sans">
+      <body className={`${figtree.className} bg-[#f5f7fa] text-neutral-900 antialiased`}>
         <ThemeProvider>
           <AuthProvider>
             {children}
