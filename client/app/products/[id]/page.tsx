@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { InvoiceUploadSection } from '@/components/products/InvoiceUploadSection';
 import { motion } from 'framer-motion';
-import { ArrowLeft, Calendar, Package, DollarSign, Store, FileText, Clock, Edit } from 'lucide-react';
+import { ArrowLeft, Calendar, Package, IndianRupee, Store, FileText, Clock, Edit } from 'lucide-react';
 import { productService } from '@/services/productService';
 import toast, { Toaster } from 'react-hot-toast';
 
@@ -105,16 +105,16 @@ export default function ProductDetailPage() {
     <DashboardLayout>
       <Toaster position="top-right" />
       
-      <div className="max-w-4xl mx-auto">
+      <div className="max-w-5xl mx-auto p-8">
         {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="mb-6"
+          className="mb-8"
         >
           <button
             onClick={() => router.back()}
-            className="flex items-center gap-2 text-sm text-neutral-600 hover:text-neutral-900 mb-4 transition-colors duration-200"
+            className="flex items-center gap-2 mb-6 px-4 py-2 text-sm font-medium text-neutral-700 bg-white border border-neutral-200 rounded-lg hover:bg-neutral-50 hover:text-neutral-900 transition-all duration-200 shadow-sm"
           >
             <ArrowLeft className="w-4 h-4" />
             Back to Products
@@ -204,12 +204,12 @@ export default function ProductDetailPage() {
               {product.price && (
                 <div className="flex items-start gap-3">
                   <div className="p-2 bg-green-50 rounded-lg">
-                    <DollarSign className="w-4 h-4 text-green-600" strokeWidth={2} />
+                    <IndianRupee className="w-4 h-4 text-green-600" strokeWidth={2} />
                   </div>
                   <div>
                     <p className="text-xs text-neutral-500 tracking-wide mb-0.5">Price</p>
                     <p className="text-sm font-medium text-neutral-900">
-                      ${product.price.toFixed(2)}
+                      ₹{product.price.toLocaleString('en-IN')}
                     </p>
                   </div>
                 </div>
