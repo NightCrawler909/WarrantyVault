@@ -9,10 +9,7 @@ import {
   OverviewCard,
   ExpiringSoonCard,
   WarrantyTimelineCard,
-  AnalyticsChartCard,
   QuickAddCard,
-  WarrantyHealthCard,
-  ManageInvoicesCard,
 } from '@/components/dashboard/bento';
 import { SmartAlertBanner } from '@/components/dashboard/SmartAlertBanner';
 
@@ -99,23 +96,11 @@ export const DashboardContent = () => {
           {/* Expiring Soon Card */}
           <ExpiringSoonCard products={expiringProducts || []} />
 
-          {/* Warranty Health Card */}
-          <WarrantyHealthCard healthScore={analytics.healthScore} />
-
-          {/* Analytics Chart Card */}
-          <AnalyticsChartCard
-            active={analytics.activeCount}
-            expired={analytics.expiredCount}
-          />
-
-          {/* Warranty Timeline Card - Full Width */}
-          <WarrantyTimelineCard products={products || []} />
-
           {/* Quick Add Card */}
           <QuickAddCard />
 
-          {/* Manage Invoices Card */}
-          <ManageInvoicesCard />
+          {/* Warranty Timeline Card - Full Width */}
+          <WarrantyTimelineCard products={products || []} />
         </motion.div>
       </motion.div>
     </div>
