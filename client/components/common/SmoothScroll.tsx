@@ -39,8 +39,9 @@ export default function SmoothScroll({ children }: { children: React.ReactNode }
             smoothWheel: true,
             wheelMultiplier: 1,
             touchMultiplier: 2,
+            // @ts-ignore
             normalizeWheel: true,
-            easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)), 
+            easing: (t: number) => Math.min(1, 1.001 - Math.pow(2, -10 * t)), 
           }
         });
       } catch (error) {
