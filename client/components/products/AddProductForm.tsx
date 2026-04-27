@@ -222,7 +222,7 @@ export const AddProductForm = () => {
             <div className="p-4 bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-xl">
               <p className="text-sm text-purple-900 leading-relaxed">
                 <span className="font-semibold">✨ AI-Powered Extraction:</span> Upload your invoice (PDF, JPG, or PNG) 
-                and we'll automatically extract product name, order ID, price, retailer, and more!
+                and we&apos;ll automatically extract product name, order ID, price, retailer, and more!
               </p>
             </div>
 

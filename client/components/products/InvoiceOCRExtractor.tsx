@@ -273,7 +273,7 @@ export const InvoiceOCRExtractor: React.FC<InvoiceOCRExtractorProps> = ({
                 <Clock className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" strokeWidth={2} />
                 <div>
                   <p className="text-xs font-medium text-amber-900 mb-1">
-                    Don't forget to enter the warranty period!
+                    Don&apos;t forget to enter the warranty period!
                   </p>
                   <p className="text-xs text-amber-700">
                     Check your product manual or invoice for warranty duration (months/years)
